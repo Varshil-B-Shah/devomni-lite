@@ -4,17 +4,24 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp-server.js",
+    "dev": "tsc && node dist/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
+    "@types/node": "^24.5.2",
     "@types/pg": "^8.15.5",
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "@types/express": "^5.0.3",
+    "express": "^5.1.0",
     "pg": "^8.16.3"
   }
 }

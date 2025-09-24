@@ -1,4 +1,3 @@
-// src/postgresAdapter.ts
 import { Pool } from "pg";
 
 export class PostgresAdapter {
