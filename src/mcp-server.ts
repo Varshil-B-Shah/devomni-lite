@@ -1,27 +1,20 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+// Import MCP SDK and transports
+import { Server } from "@modelcontextprotocol/sdk/server/index.js"; // Main MCP server class
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"; // For local stdio transport
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/sdk/types.js"; // Tool schemas
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 
+// Import your database adapters
 import { PostgresAdapter } from "./postgresAdapter.js";
 import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
 
-const server = new Server(
-  {
-    name: "devomni-postgres",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+// Load environment variables (assume dotenv is set up elsewhere)
 
+// Initialize database adapters with config from .env
 const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
 
 const mysqlDb = new MySQLAdapter({
@@ -31,175 +24,197 @@ const mysqlDb = new MySQLAdapter({
   password: process.env.MYSQL_PASSWORD!,
   database: process.env.MYSQL_DATABASE!,
 });
-
 const mongoDb = new MongoAdapter(
   process.env.MONGODB_URI!,
   process.env.MONGODB_DATABASE!
 );
 
+function formatResult(result: any): string {
+  // If result is an array (MongoDB), just stringify it
+  if (Array.isArray(result)) {
+    return JSON.stringify(result, null, 2);
+  }
+  // If result has a .rows property (Postgres/MySQL), use that
+  if (result && typeof result === "object" && "rows" in result) {
+    return JSON.stringify(result.rows, null, 2);
+  }
+  // Fallback: stringify the whole result
+  return JSON.stringify(result, null, 2);
+}
+
+// Create the MCP server
+const server = new Server(
+  {
+    name: "devomni-unified",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// Register tools (unified_query and compare_databases)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "query_postgres",
-        description: "Execute SQL queries on PostgreSQL",
+        name: "unified_query",
+        description:
+          "Query any database (Postgres, MySQL, MongoDB) with a single tool",
         inputSchema: {
           type: "object",
           properties: {
-            sql: { type: "string", description: "SQL query" },
-            params: {
-              type: "array",
-              items: { type: "string" },
-              description: "Query parameters",
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Which database to query",
             },
-          },
-          required: ["sql"],
-        },
-      },
-      {
-        name: "query_mysql",
-        description: "Execute SQL queries on MySQL",
-        inputSchema: {
-          type: "object",
-          properties: {
-            sql: { type: "string", description: "SQL query" },
-            params: {
-              type: "array",
-              items: { type: "string" },
-              description: "Query parameters",
+            query: {
+              type: "string",
+              description:
+                "SQL query (for Postgres/MySQL) or ignored for MongoDB",
             },
-          },
-          required: ["sql"],
-        },
-      },
-      {
-        name: "find_mongo",
-        description: "Query documents in a MongoDB collection",
-        inputSchema: {
-          type: "object",
-          properties: {
-            collection: { type: "string", description: "Collection name" },
-            filter: { type: "object", description: "MongoDB filter (JSON)" },
+            collection: {
+              type: "string",
+              description: "MongoDB collection name (Mongo only)",
+            },
+            filter: {
+              type: "object",
+              description: "MongoDB filter (Mongo only)",
+            },
             projection: {
               type: "object",
-              description: "Fields to include/exclude",
+              description: "MongoDB projection (Mongo only)",
             },
           },
-          required: ["collection"],
+          required: ["database"],
         },
       },
       {
-        name: "insert_mongo",
-        description: "Insert a document into a MongoDB collection",
+        name: "compare_databases",
+        description:
+          "Compare results from two databases (Postgres, MySQL, MongoDB)",
         inputSchema: {
           type: "object",
           properties: {
-            collection: { type: "string", description: "Collection name" },
-            document: { type: "object", description: "Document to insert" },
-          },
-          required: ["collection", "document"],
-        },
-      },
-      {
-        name: "update_mongo",
-        description: "Update documents in a MongoDB collection",
-        inputSchema: {
-          type: "object",
-          properties: {
-            collection: { type: "string", description: "Collection name" },
-            filter: {
-              type: "object",
-              description: "Filter for documents to update",
+            db1: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "First database",
             },
-            update: {
-              type: "object",
-              description:
-                "Update operations (e.g., { $set: { field: value } })",
+            db2: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Second database",
             },
-          },
-          required: ["collection", "filter", "update"],
-        },
-      },
-      {
-        name: "delete_mongo",
-        description: "Delete documents from a MongoDB collection",
-        inputSchema: {
-          type: "object",
-          properties: {
-            collection: { type: "string", description: "Collection name" },
-            filter: {
+            query1: {
+              type: "string",
+              description: "SQL or MongoDB query for db1",
+            },
+            query2: {
+              type: "string",
+              description: "SQL or MongoDB query for db2",
+            },
+            collection1: {
+              type: "string",
+              description: "Collection for db1 (Mongo only)",
+            },
+            collection2: {
+              type: "string",
+              description: "Collection for db2 (Mongo only)",
+            },
+            filter1: {
               type: "object",
-              description: "Filter for documents to delete",
+              description: "Filter for db1 (Mongo only)",
+            },
+            filter2: {
+              type: "object",
+              description: "Filter for db2 (Mongo only)",
             },
           },
-          required: ["collection", "filter"],
+          required: ["db1", "db2"],
         },
-      },
-      {
-        name: "list_mongo_collections",
-        description: "List collections in the current MongoDB database",
-        inputSchema: { type: "object", properties: {} },
       },
     ],
   };
 });
 
+// Handle tool calls
 server.setRequestHandler(
   CallToolRequestSchema,
   async (request: CallToolRequest) => {
     const { name, arguments: args } = request.params;
     try {
       switch (name) {
-        case "query_postgres": {
-          const { sql, params } = args as { sql: string; params?: string[] };
-          const result = await pgDb.query(sql, params);
+        case "unified_query": {
+          // Route to the correct database adapter
+          const { database, query, collection, filter, projection } =
+            args as any;
+          if (database === "postgres") {
+            const result = await pgDb.query(query);
+            return {
+              content: [
+                { type: "text", text: JSON.stringify(result.rows, null, 2) },
+              ],
+            };
+          } else if (database === "mysql") {
+            const result = await mysqlDb.query(query);
+            return {
+              content: [
+                { type: "text", text: JSON.stringify(result.rows, null, 2) },
+              ],
+            };
+          } else if (database === "mongo") {
+            const rows = await mongoDb.find(collection, filter, projection);
+            return {
+              content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
+            };
+          } else {
+            throw new Error("Unknown database type");
+          }
+        }
+        case "compare_databases": {
+          const {
+            db1,
+            db2,
+            query1,
+            query2,
+            collection1,
+            collection2,
+            filter1,
+            filter2,
+          } = args as any;
+          let result1, result2;
+          // Query first database
+          if (db1 === "postgres") {
+            result1 = await pgDb.query(query1);
+          } else if (db1 === "mysql") {
+            result1 = await mysqlDb.query(query1);
+          } else if (db1 === "mongo") {
+            result1 = await mongoDb.find(collection1, filter1);
+          }
+          // Query second database
+          if (db2 === "postgres") {
+            result2 = await pgDb.query(query2);
+          } else if (db2 === "mysql") {
+            result2 = await mysqlDb.query(query2);
+          } else if (db2 === "mongo") {
+            result2 = await mongoDb.find(collection2, filter2);
+          }
+          // Safely handle possibly undefined results
           return {
             content: [
-              { type: "text", text: JSON.stringify(result.rows, null, 2) },
+              {
+                type: "text",
+                text: "Result from " + db1 + ":\n" + formatResult(result1),
+              },
+              {
+                type: "text",
+                text: "Result from " + db2 + ":\n" + formatResult(result2),
+              },
             ],
-          };
-        }
-        case "query_mysql": {
-          const { sql, params } = args as { sql: string; params?: string[] };
-          const result = await mysqlDb.query(sql, params);
-          return {
-            content: [
-              { type: "text", text: JSON.stringify(result.rows, null, 2) },
-            ],
-          };
-        }
-        case "find_mongo": {
-          const { collection, filter, projection } = args as any;
-          const rows = await mongoDb.find(collection, filter, projection);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
-        case "insert_mongo": {
-          const { collection, document } = args as any;
-          const result = await mongoDb.insert(collection, document);
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          };
-        }
-        case "update_mongo": {
-          const { collection, filter, update } = args as any;
-          const result = await mongoDb.update(collection, filter, update);
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          };
-        }
-        case "delete_mongo": {
-          const { collection, filter } = args as any;
-          const result = await mongoDb.delete(collection, filter);
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          };
-        }
-        case "list_mongo_collections": {
-          const names = await mongoDb.listCollections();
-          return {
-            content: [{ type: "text", text: JSON.stringify(names, null, 2) }],
           };
         }
         default:
@@ -216,10 +231,11 @@ server.setRequestHandler(
   }
 );
 
+// Start the MCP server (stdio transport for local use)
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Devomni MCP server running");
+  console.error("Devomni Unified MCP server running");
 }
 
 main().catch((error) => {
