@@ -83,7 +83,7 @@ export class McpClient {
                 name: 'list_database_tables',
                 arguments: {
                     database,
-                    include_row_counts: includeRowCounts
+                    includeRowCounts: includeRowCounts  // Fixed parameter name
                 }
             };
 
@@ -162,11 +162,11 @@ export class McpClient {
 
     private async callMcpTool(payload: any): Promise<any> {
         try {
-            // For HTTP server version, we'll use the /query endpoint
-            // This assumes your server.ts is running alongside the MCP server
+            // For HTTP server version, we'll use the /mcp-tool endpoint
+            // Using the correct parameter names that the server expects
             const response = await this.httpClient.post('/mcp-tool', {
-                tool: payload.name,
-                args: payload.arguments
+                toolName: payload.name,
+                arguments: payload.arguments
             });
 
             if (response.data.error) {

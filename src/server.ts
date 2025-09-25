@@ -261,15 +261,19 @@ async function getPostgresTables(includeRowCounts = false) {
 }
 
 async function getMySQLTables(includeRowCounts = false) {
-  const query = `
-    SELECT table_name 
-    FROM information_schema.tables 
-    WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
-    ORDER BY table_name
-  `;
+  // Use SHOW TABLES which is simpler and more reliable
+  const query = "SHOW TABLES";
   
   const result = await mysqlDb.query(query);
-  const tables = ((result as any).rows || result).map((row: any) => ({ name: row.table_name, type: 'table' }));
+  const rows = (result as any).rows || result;
+  
+  // MySQL SHOW TABLES returns different column names based on database
+  // Extract table names from the result regardless of column name
+  const tables = rows.map((row: any) => {
+    const tableName = Object.values(row)[0] as string; // Get first column value
+    return { name: tableName, type: 'table' };
+  });
+  
   return { database: 'mysql', tables };
 }
 
