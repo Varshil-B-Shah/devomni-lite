@@ -22,6 +22,7 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
   - `compare_databases`: Compare results between two different databases safely
 - **Comprehensive error handling:** Clear, secure error messages
 - **Security testing:** Built-in security test suite
+- **Filesystem integration (optional):** Claude can access, search, and organize your local files or Obsidian vaults via the Filesystem MCP server for AI-powered file management and persistent memory.
 
 ## Getting Started
 1. **Clone the repo**
@@ -55,12 +56,42 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
    ```
 7. **Integrate with Claude Desktop or any MCP client**
 
+## 🗂️ Filesystem Integration (Optional)
+Enable Claude to access and manage your local files or Obsidian notes for advanced automation and persistent memory.
+
+### How to Enable Filesystem MCP Server
+1. **Open Claude Desktop → Settings → Developer → Edit Config.**
+2. **Add or update the `mcpServers` section in your `claude_desktop_config.json`:**
+   ```json
+   {
+     "mcpServers": {
+       "filesystem": {
+         "command": "npx",
+         "args": [
+           "-y",
+           "@modelcontextprotocol/server-filesystem",
+           "C:/Users/YourUsername/Desktop",
+           "C:/Users/YourUsername/Documents"
+         ]
+       }
+     }
+   }
+   ```
+   - Replace `YourUsername` with your actual username (on Mac, use `/Users/yourusername/Desktop`, etc.).
+   - Add or remove directory paths as needed. Each path after the package name is a folder Claude can access.
+3. **Save and restart Claude Desktop.**
+4. **Test with prompts like:**
+   - "List all Markdown files in my Documents folder."
+   - "Summarize the contents of 'project_notes.txt' on my Desktop."
+   - "Organize all images on my Desktop into a new folder called 'Images'."
+
+**Security Note:** Only expose folders you trust Claude with. Claude can read, write, and delete files in these directories. All file actions require your approval.
+
 ## 🧪 Security Testing
 Run the comprehensive Jest security test suite to validate all protections:
 ```bash
 npm test
 ```
-
 For additional testing options:
 ```bash
 npm run test:coverage    # Run tests with coverage report
@@ -94,4 +125,4 @@ For detailed security information, see [SECURITY.md](./SECURITY.md)
 
 ***
 
-*DevOmni Lite combines the power of multi-database access with enterprise-grade security, making it safe for AI-assisted database operations.*
+*DevOmni Lite combines the power of multi-database access with enterprise-grade security, making it safe for AI-assisted database operations. Now with optional filesystem integration for AI-powered file management and persistent memory.*
