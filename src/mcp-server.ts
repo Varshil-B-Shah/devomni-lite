@@ -1,20 +1,15 @@
-// Import MCP SDK and transports
-import { Server } from "@modelcontextprotocol/sdk/server/index.js"; // Main MCP server class
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"; // For local stdio transport
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js"; // Tool schemas
+} from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 
-// Import your database adapters
 import { PostgresAdapter } from "./postgresAdapter.js";
 import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
 
-// Load environment variables (assume dotenv is set up elsewhere)
-
-// Initialize database adapters with config from .env
 const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
 
 const mysqlDb = new MySQLAdapter({
@@ -30,19 +25,15 @@ const mongoDb = new MongoAdapter(
 );
 
 function formatResult(result: any): string {
-  // If result is an array (MongoDB), just stringify it
   if (Array.isArray(result)) {
     return JSON.stringify(result, null, 2);
   }
-  // If result has a .rows property (Postgres/MySQL), use that
   if (result && typeof result === "object" && "rows" in result) {
     return JSON.stringify(result.rows, null, 2);
   }
-  // Fallback: stringify the whole result
   return JSON.stringify(result, null, 2);
 }
 
-// Create the MCP server
 const server = new Server(
   {
     name: "devomni-unified",
@@ -55,7 +46,6 @@ const server = new Server(
   }
 );
 
-// Register tools (unified_query and compare_databases)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -141,7 +131,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// Handle tool calls
 server.setRequestHandler(
   CallToolRequestSchema,
   async (request: CallToolRequest) => {
@@ -149,7 +138,6 @@ server.setRequestHandler(
     try {
       switch (name) {
         case "unified_query": {
-          // Route to the correct database adapter
           const { database, query, collection, filter, projection } =
             args as any;
           if (database === "postgres") {
@@ -187,7 +175,6 @@ server.setRequestHandler(
             filter2,
           } = args as any;
           let result1, result2;
-          // Query first database
           if (db1 === "postgres") {
             result1 = await pgDb.query(query1);
           } else if (db1 === "mysql") {
@@ -195,7 +182,6 @@ server.setRequestHandler(
           } else if (db1 === "mongo") {
             result1 = await mongoDb.find(collection1, filter1);
           }
-          // Query second database
           if (db2 === "postgres") {
             result2 = await pgDb.query(query2);
           } else if (db2 === "mysql") {
@@ -203,7 +189,6 @@ server.setRequestHandler(
           } else if (db2 === "mongo") {
             result2 = await mongoDb.find(collection2, filter2);
           }
-          // Safely handle possibly undefined results
           return {
             content: [
               {
@@ -231,7 +216,6 @@ server.setRequestHandler(
   }
 );
 
-// Start the MCP server (stdio transport for local use)
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
