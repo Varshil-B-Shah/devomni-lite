@@ -22,6 +22,7 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
   - `compare_databases`: Compare results between two different databases safely
 - **Comprehensive error handling:** Clear, secure error messages
 - **Security testing:** Built-in security test suite
+- **Cloud workspace integration (optional):** Claude can connect to Notion for project management, notes, and automation using the Notion MCP server.
 
 ## Getting Started
 1. **Clone the repo**
@@ -55,6 +56,69 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
    ```
 7. **Integrate with Claude Desktop or any MCP client**
 
+## 🗂️ Filesystem Integration (Optional)
+Enable Claude to access and manage your local files or Obsidian notes for advanced automation and persistent memory.
+
+### How to Enable Filesystem MCP Server
+1. **Open Claude Desktop → Settings → Developer → Edit Config.**
+2. **Add or update the `mcpServers` section in your `claude_desktop_config.json`:**
+   ```json
+   {
+     "mcpServers": {
+       "filesystem": {
+         "command": "npx",
+         "args": [
+           "-y",
+           "@modelcontextprotocol/server-filesystem",
+           "/Users/yourusername/Desktop",
+           "/Users/yourusername/Downloads"
+         ]
+       }
+     }
+   }
+   ```
+   - Replace `yourusername` with your actual computer username.
+   - Add or remove directory paths as needed. Each path after the package name is a folder Claude can access.
+3. **Save and restart Claude Desktop.**
+4. **Test with prompts like:**
+   - "List all Markdown files in my Documents folder."
+   - "Summarize the contents of 'project_notes.txt' on my Desktop."
+   - "Organize all images on my Desktop into a new folder called 'Images'."
+
+**Security Note:** Only grant access to directories you’re comfortable with Claude reading and modifying. The server runs with your user account permissions, so it can perform any file operations you can perform manually. All file actions require your approval.
+
+## ☁️ Notion Integration (Optional)
+Enable Claude to automate and manage your Notion workspace for project management, notes, and cloud productivity.
+
+### How to Enable Notion MCP Server
+1. **Create a Notion integration and get your API token:**
+   - Go to [notion.so/profile/integrations](https://www.notion.so/profile/integrations) and create a new integration.
+   - Copy the secret token (starts with `ntn_`).
+2. **Share Notion pages/databases with your integration:**
+   - In Notion, open the page/database, click the three dots, go to Connections, and add your integration.
+3. **Add the Notion MCP server to your Claude Desktop config:**
+   ```json
+   {
+     "mcpServers": {
+       "notionApi": {
+         "command": "npx",
+         "args": ["-y", "@notionhq/notion-mcp-server"],
+         "env": {
+           "NOTION_TOKEN": "ntn_your_secret_token_here"
+         }
+       }
+     }
+   }
+   ```
+   - Replace `ntn_your_secret_token_here` with your actual Notion integration token.
+4. **Save and restart Claude Desktop.**
+5. **Test with prompts like:**
+   - "List all my Notion databases."
+   - "Find the page titled 'Project Roadmap' and summarize it."
+   - "Create a new note in my 'Ideas' database."
+
+**Security Note:** Only share pages/databases you want Claude to access. Review and approve each action Claude requests. You can always remove the integration or revoke access in Notion's settings.
+
 ## 🧪 Security Testing
 Run the comprehensive Jest security test suite to validate all protections:
 ```bash
@@ -84,6 +148,8 @@ For detailed security information, see [SECURITY.md](./SECURITY.md)
 - [Reference MCP Servers](https://github.com/modelcontextprotocol/servers)
 - [MCP SDK Documentation](https://modelcontextprotocol.io/docs/sdk)
 - [Zod Validation Library](https://zod.dev/)
+- [Connect to Local MCP Servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers)
+- [Notion MCP Integration Guide](https://www.getclockwise.com/blog/claude-notion-mcp-integration)
 
 ## Scripts
 - `npm run build` - Build TypeScript to JavaScript
@@ -94,4 +160,4 @@ For detailed security information, see [SECURITY.md](./SECURITY.md)
 
 ***
 
-*DevOmni Lite combines the power of multi-database access with enterprise-grade security, making it safe for AI-assisted database operations.*
+*DevOmni Lite combines the power of multi-database access with enterprise-grade security, making it safe for AI-assisted database operations. Now with optional filesystem and Notion integration for AI-powered file and cloud workspace management.*
