@@ -9,6 +9,12 @@ import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import { PostgresAdapter } from "./postgresAdapter.js";
 import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
+import { 
+  UnifiedQuerySchema, 
+  CompareDatabasesSchema, 
+  validateInput,
+  logSecurityEvent 
+} from "./inputValidator.js";
 
 const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
 
@@ -135,27 +141,39 @@ server.setRequestHandler(
   CallToolRequestSchema,
   async (request: CallToolRequest) => {
     const { name, arguments: args } = request.params;
+    
     try {
       switch (name) {
         case "unified_query": {
-          const { database, query, collection, filter, projection } =
-            args as any;
+          // Security: Validate input using Zod schema
+          const validatedArgs = validateInput(UnifiedQuerySchema, args);
+          const { database, query, collection, filter, projection } = validatedArgs;
+          
+          // Log the query attempt for security monitoring
+          logSecurityEvent("unified_query_attempt", {
+            database,
+            hasQuery: !!query,
+            hasCollection: !!collection,
+            hasFilter: !!filter && Object.keys(filter).length > 0,
+            hasProjection: !!projection && Object.keys(projection).length > 0
+          });
+
           if (database === "postgres") {
-            const result = await pgDb.query(query);
+            const result = await pgDb.query(query!);
             return {
               content: [
                 { type: "text", text: JSON.stringify(result.rows, null, 2) },
               ],
             };
           } else if (database === "mysql") {
-            const result = await mysqlDb.query(query);
+            const result = await mysqlDb.query(query!);
             return {
               content: [
                 { type: "text", text: JSON.stringify(result.rows, null, 2) },
               ],
             };
           } else if (database === "mongo") {
-            const rows = await mongoDb.find(collection, filter, projection);
+            const rows = await mongoDb.find(collection!, filter, projection);
             return {
               content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
             };
@@ -164,6 +182,8 @@ server.setRequestHandler(
           }
         }
         case "compare_databases": {
+          // Security: Validate input using Zod schema
+          const validatedArgs = validateInput(CompareDatabasesSchema, args);
           const {
             db1,
             db2,
@@ -173,21 +193,32 @@ server.setRequestHandler(
             collection2,
             filter1,
             filter2,
-          } = args as any;
+          } = validatedArgs;
+          
+          // Log the comparison attempt for security monitoring
+          logSecurityEvent("compare_databases_attempt", {
+            db1,
+            db2,
+            hasQuery1: !!query1,
+            hasQuery2: !!query2,
+            hasCollection1: !!collection1,
+            hasCollection2: !!collection2
+          });
+
           let result1, result2;
           if (db1 === "postgres") {
-            result1 = await pgDb.query(query1);
+            result1 = await pgDb.query(query1!);
           } else if (db1 === "mysql") {
-            result1 = await mysqlDb.query(query1);
+            result1 = await mysqlDb.query(query1!);
           } else if (db1 === "mongo") {
-            result1 = await mongoDb.find(collection1, filter1);
+            result1 = await mongoDb.find(collection1!, filter1);
           }
           if (db2 === "postgres") {
-            result2 = await pgDb.query(query2);
+            result2 = await pgDb.query(query2!);
           } else if (db2 === "mysql") {
-            result2 = await mysqlDb.query(query2);
+            result2 = await mysqlDb.query(query2!);
           } else if (db2 === "mongo") {
-            result2 = await mongoDb.find(collection2, filter2);
+            result2 = await mongoDb.find(collection2!, filter2);
           }
           return {
             content: [
@@ -206,8 +237,17 @@ server.setRequestHandler(
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      
+      // Log security-related errors
+      if (errorMessage.includes("Security:") || errorMessage.includes("Input validation failed")) {
+        logSecurityEvent("validation_error", {
+          tool: name,
+          error: errorMessage,
+          args: args
+        });
+      }
+      
       return {
         content: [{ type: "text", text: `Error: ${errorMessage}` }],
         isError: true,
