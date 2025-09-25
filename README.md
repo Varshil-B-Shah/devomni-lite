@@ -1,9 +1,28 @@
-# DevOmni Lite MCP Server
+# DevOmni Lite MCP Server + VS Code Extension
 
-**Date:** September 25, 2025
+**Date:** September 26, 2025
+
+## 🌟 **NEW: AI-Powered Code Generation Extension**
+
+DevOmni Lite now includes a **VS Code extension** that works with **GitHub Copilot** to generate complete APIs from your database schemas! 
+
+**Workflow**: Claude Desktop ←→ DevOmni MCP ←→ VS Code Extension ←→ GitHub Copilot
 
 ## Overview
-DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI tools and LLMs (like Claude Desktop) to safely query multiple database types through a unified interface. This project features robust input validation, injection protection, and comprehensive security monitoring.
+DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI tools and LLMs (like Claude Desktop) to safely query multiple database types through a unified interface. Now enhanced with **automatic code generation capabilities** through our VS Code extension.
+
+## 🚀 **What's New**
+
+### **AI Code Generation**
+- **🤖 GitHub Copilot Integration**: Just ask "Generate APIs for users table" and get complete API code
+- **📋 Multi-Framework Support**: Next.js, Express, NestJS, FastAPI, and more
+- **⚡ Smart Schema Caching**: Automatic schema synchronization and caching
+- **🔄 Real-time Updates**: Schema stays in sync with your database changes
+
+### **Enhanced MCP Tools**
+- **`get_database_schema`**: Extract complete table structures and relationships
+- **`list_database_tables`**: Get all tables with optional row counts  
+- **`export_schema_for_codegen`**: Schema optimized for AI code generation
 
 ## 🛡️ Security Features
 - **🔒 Input Validation**: Comprehensive Zod-based runtime validation
@@ -17,16 +36,82 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
 - **MCP-compliant server:** Communicates via stdin/stdout for seamless LLM integration
 - **Multi-database support:** PostgreSQL, MySQL, and MongoDB with unified interface
 - **Secure database access:** Connection pooling with security configurations
+- **AI Code Generation:** VS Code extension for automatic API generation
+- **Schema extraction:** Advanced database schema analysis for code generation
 - **Registered tools:**
   - `unified_query`: Query any database (Postgres, MySQL, MongoDB) with security validation
   - `compare_databases`: Compare results between two different databases safely
+  - `get_database_schema`: Extract complete database schema for AI code generation
+  - `list_database_tables`: List all tables/collections with metadata
+  - `export_schema_for_codegen`: Export schema optimized for AI code generation
 - **Comprehensive error handling:** Clear, secure error messages
 - **Security testing:** Built-in security test suite
-- **Cloud workspace integration (optional):** Claude can connect to Notion for project management, notes, and automation using the Notion MCP server.
-- **Filesystem integration (optional):** Claude can access, search, and organize your local files or Obsidian vaults via the Filesystem MCP server for AI-powered file management and persistent memory.
-- **Cloud workspace integration (optional):** Claude can connect to Notion for project management, notes, and automation using the Notion MCP server.
 
-## Getting Started
+## 🎯 **Quick Start with Code Generation**
+
+### **1. Setup DevOmni MCP Server**
+```bash
+# Clone and install
+git clone <repo-url>
+cd devomni-lite
+npm install
+
+# Configure database
+echo "PG_CONNECTION_STRING=postgresql://user:password@host:5432/db" > .env
+
+# Build and start
+npm run build
+npm start  # MCP server for Claude Desktop
+
+# Also start HTTP server for VS Code extension
+node dist/server.js  # HTTP server on port 3000
+```
+
+### **2. Install VS Code Extension**
+```bash
+cd extension
+npm install
+npm run compile
+
+# Install in VS Code (or from marketplace when published)
+code --install-extension ./devomni-codegen-0.1.0.vsix
+```
+
+### **3. Configure VS Code**
+```json
+{
+  "devomni.mcpServerUrl": "http://localhost:3000",
+  "devomni.database": "postgres",
+  "devomni.targetFramework": "nextjs"
+}
+```
+
+### **4. Generate APIs with AI**
+1. **Command Palette** → `DevOmni: Refresh Database Schema`
+2. **Ask GitHub Copilot**: "Generate CRUD APIs for users table"
+3. **Watch magic happen**: Complete API files created automatically!
+
+## 🔄 **Dual Interface Architecture**
+
+### **For AI Chat (Claude Desktop)**
+```
+Claude Desktop ←→ DevOmni MCP Server (stdio)
+├── Database exploration
+├── Complex queries  
+├── Data analysis
+└── Schema inspection
+```
+
+### **For Code Generation (VS Code)**
+```
+VS Code Extension ←→ DevOmni HTTP Server (port 3000) ←→ GitHub Copilot
+├── Schema caching
+├── API generation
+├── Type generation
+└── CRUD creation
+```
+
+## Getting Started (Traditional MCP Setup)
 1. **Clone the repo**
 2. **Install dependencies:**
    ```bash

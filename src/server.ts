@@ -1,14 +1,130 @@
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
 import express from "express";
+import cors from "cors";
 import { PostgresAdapter } from "./postgresAdapter.js";
+import { MySQLAdapter } from "./mysqlAdapter.js";
+import { MongoAdapter } from "./mongoAdapter.js";
+import { 
+  validateInput,
+  UnifiedQuerySchema, 
+  GetDatabaseSchemaSchema,
+  ListDatabaseTablesSchema,
+  ExportSchemaForCodegenSchema
+} from "./inputValidator.js";
 
 const app = express();
 app.use(express.json());
-const db = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
+app.use(cors()); // Allow cross-origin requests from VS Code extension
 
+const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
+const mysqlDb = new MySQLAdapter({
+  host: process.env.MYSQL_HOST!,
+  port: Number(process.env.MYSQL_PORT!),
+  user: process.env.MYSQL_USER!,
+  password: process.env.MYSQL_PASSWORD!,
+  database: process.env.MYSQL_DATABASE!,
+});
+const mongoDb = new MongoAdapter(
+  process.env.MONGODB_URI!,
+  process.env.MONGODB_DATABASE!
+);
+
+// MCP Tool endpoint for VS Code extension
+app.post("/mcp-tool", async (req, res) => {
+  const { toolName, arguments: args } = req.body;
+  
+  try {
+    let result;
+    
+    switch (toolName) {
+      case "unified_query": {
+        const validatedArgs = validateInput(UnifiedQuerySchema, args);
+        const { database, query, collection, filter, projection } = validatedArgs;
+        
+        if (database === "postgres") {
+          const queryResult = await pgDb.query(query!);
+          result = { content: [{ type: "text", text: JSON.stringify(queryResult.rows, null, 2) }] };
+        } else if (database === "mysql") {
+          const queryResult = await mysqlDb.query(query!);
+          result = { content: [{ type: "text", text: JSON.stringify(queryResult.rows, null, 2) }] };
+        } else if (database === "mongo") {
+          const rows = await mongoDb.find(collection!, filter, projection);
+          result = { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+        }
+        break;
+      }
+      
+      case "get_database_schema": {
+        const validatedArgs = validateInput(GetDatabaseSchemaSchema, args);
+        const { database, table_name, include_sample_data } = validatedArgs;
+        
+        let schemaResult;
+        if (database === "postgres") {
+          schemaResult = await getPostgresSchema(table_name, include_sample_data);
+        } else if (database === "mysql") {
+          schemaResult = await getMySQLSchema(table_name, include_sample_data);
+        } else if (database === "mongo") {
+          schemaResult = await getMongoSchema(table_name, include_sample_data);
+        }
+        
+        result = { content: [{ type: "text", text: JSON.stringify(schemaResult, null, 2) }] };
+        break;
+      }
+      
+      case "list_database_tables": {
+        const validatedArgs = validateInput(ListDatabaseTablesSchema, args);
+        const { database, include_row_counts } = validatedArgs;
+        
+        let tablesResult;
+        if (database === "postgres") {
+          tablesResult = await getPostgresTables(include_row_counts);
+        } else if (database === "mysql") {
+          tablesResult = await getMySQLTables(include_row_counts);
+        } else if (database === "mongo") {
+          tablesResult = await getMongoTables(include_row_counts);
+        }
+        
+        result = { content: [{ type: "text", text: JSON.stringify(tablesResult, null, 2) }] };
+        break;
+      }
+      
+      case "export_schema_for_codegen": {
+        const validatedArgs = validateInput(ExportSchemaForCodegenSchema, args);
+        const { database, target_framework, include_relationships } = validatedArgs;
+        
+        let codegenSchema;
+        if (database === "postgres") {
+          codegenSchema = await exportPostgresForCodegen(target_framework, include_relationships);
+        } else if (database === "mysql") {
+          codegenSchema = await exportMySQLForCodegen(target_framework, include_relationships);
+        } else if (database === "mongo") {
+          codegenSchema = await exportMongoForCodegen(target_framework, include_relationships);
+        }
+        
+        result = { content: [{ type: "text", text: JSON.stringify(codegenSchema, null, 2) }] };
+        break;
+      }
+      
+      default:
+        throw new Error(`Unknown tool: ${toolName}`);
+    }
+    
+    res.json(result);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+// Legacy endpoints
 app.post("/query", async (req, res) => {
   const { sql, params } = req.body;
   try {
-    const result = await db.query(sql, params);
+    const result = await pgDb.query(sql, params);
     res.json(result.rows);
   } catch (e: unknown) {
     if (e instanceof Error) {
@@ -20,7 +136,7 @@ app.post("/query", async (req, res) => {
 });
 
 app.get("/schema", async (req, res) => {
-  const result = await db.query(
+  const result = await pgDb.query(
     `SELECT table_name FROM information_schema.tables WHERE table_schema='public'`
   );
   res.json(result.rows);
@@ -28,7 +144,7 @@ app.get("/schema", async (req, res) => {
 
 app.get("/test-connection", async (req, res) => {
   try {
-    await db.query("SELECT 1");
+    await pgDb.query("SELECT 1");
     res.json({ ok: true });
   } catch (e) {
     if (e instanceof Error) {
@@ -39,4 +155,225 @@ app.get("/test-connection", async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("MCP server running on port 3000"));
+// Schema helper functions (copied from mcp-server.ts)
+async function getPostgresSchema(tableName?: string, includeSampleData = false) {
+  // Implementation same as in mcp-server.ts
+  let query;
+  let params: any[] = [];
+  
+  if (tableName) {
+    query = `
+      SELECT 
+        c.table_name,
+        c.column_name,
+        c.data_type,
+        c.is_nullable,
+        c.column_default,
+        c.character_maximum_length,
+        c.numeric_precision,
+        c.numeric_scale,
+        tc.constraint_type
+      FROM information_schema.columns c
+      LEFT JOIN information_schema.key_column_usage kcu 
+        ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+      LEFT JOIN information_schema.table_constraints tc 
+        ON kcu.constraint_name = tc.constraint_name
+      WHERE c.table_schema = 'public' AND c.table_name = $1
+      ORDER BY c.table_name, c.ordinal_position
+    `;
+    params = [tableName];
+  } else {
+    query = `
+      SELECT 
+        c.table_name,
+        c.column_name,
+        c.data_type,
+        c.is_nullable,
+        c.column_default,
+        c.character_maximum_length,
+        c.numeric_precision,
+        c.numeric_scale,
+        tc.constraint_type
+      FROM information_schema.columns c
+      LEFT JOIN information_schema.key_column_usage kcu 
+        ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+      LEFT JOIN information_schema.table_constraints tc 
+        ON kcu.constraint_name = tc.constraint_name
+      WHERE c.table_schema = 'public'
+      ORDER BY c.table_name, c.ordinal_position
+    `;
+  }
+
+  const result = await pgDb.query(query, params);
+  return organizeSchemaData(result.rows, 'postgres');
+}
+
+async function getMySQLSchema(tableName?: string, includeSampleData = false) {
+  // Simplified implementation
+  let query = `
+    SELECT 
+      table_name,
+      column_name,
+      data_type,
+      is_nullable,
+      column_default
+    FROM information_schema.columns 
+    WHERE table_schema = DATABASE()
+  `;
+  
+  if (tableName) {
+    query += ` AND table_name = ?`;
+    const result = await mysqlDb.query(query, [tableName]);
+    return organizeSchemaData((result as any).rows || result, 'mysql');
+  } else {
+    const result = await mysqlDb.query(query);
+    return organizeSchemaData((result as any).rows || result, 'mysql');
+  }
+}
+
+async function getMongoSchema(collectionName?: string, includeSampleData = false) {
+  const collections = collectionName ? [collectionName] : await mongoDb.listCollections();
+  const schema: any = {};
+  
+  for (const collection of collections) {
+    const sampleDocs = await mongoDb.find(collection, {});
+    schema[collection] = {
+      type: 'collection',
+      fields: inferMongoSchema(sampleDocs.slice(0, 5)),
+      documentCount: sampleDocs.length
+    };
+  }
+  
+  return schema;
+}
+
+async function getPostgresTables(includeRowCounts = false) {
+  const query = `
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+  `;
+  
+  const result = await pgDb.query(query);
+  const tables = result.rows.map((row: any) => ({ name: row.table_name, type: 'table' }));
+  return { database: 'postgres', tables };
+}
+
+async function getMySQLTables(includeRowCounts = false) {
+  const query = `
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+  `;
+  
+  const result = await mysqlDb.query(query);
+  const tables = ((result as any).rows || result).map((row: any) => ({ name: row.table_name, type: 'table' }));
+  return { database: 'mysql', tables };
+}
+
+async function getMongoTables(includeRowCounts = false) {
+  const collections = await mongoDb.listCollections();
+  const tables = collections.map(name => ({ name, type: 'collection' }));
+  return { database: 'mongo', tables };
+}
+
+async function exportPostgresForCodegen(targetFramework = 'generic', includeRelationships = true) {
+  const schema = await getPostgresSchema();
+  return formatSchemaForCodegen(schema, 'postgres', targetFramework, includeRelationships);
+}
+
+async function exportMySQLForCodegen(targetFramework = 'generic', includeRelationships = true) {
+  const schema = await getMySQLSchema();
+  return formatSchemaForCodegen(schema, 'mysql', targetFramework, includeRelationships);
+}
+
+async function exportMongoForCodegen(targetFramework = 'generic', includeRelationships = true) {
+  const schema = await getMongoSchema();
+  return formatSchemaForCodegen(schema, 'mongo', targetFramework, includeRelationships);
+}
+
+function organizeSchemaData(rows: any[], dbType: string) {
+  const schema: any = {};
+  
+  for (const row of rows) {
+    const tableName = row.table_name;
+    if (!schema[tableName]) {
+      schema[tableName] = {
+        type: 'table',
+        columns: {}
+      };
+    }
+    
+    schema[tableName].columns[row.column_name] = {
+      type: row.data_type,
+      nullable: row.is_nullable === 'YES',
+      default: row.column_default,
+      maxLength: row.character_maximum_length,
+      precision: row.numeric_precision,
+      scale: row.numeric_scale,
+      key: row.constraint_type
+    };
+  }
+  
+  return schema;
+}
+
+function inferMongoSchema(documents: any[]) {
+  const schema: any = {};
+  
+  for (const doc of documents) {
+    for (const [key, value] of Object.entries(doc)) {
+      if (!schema[key]) {
+        schema[key] = {
+          types: new Set(),
+          nullable: false,
+          examples: []
+        };
+      }
+      
+      if (value === null || value === undefined) {
+        schema[key].nullable = true;
+      } else {
+        schema[key].types.add(typeof value);
+        if (schema[key].examples.length < 3) {
+          schema[key].examples.push(value);
+        }
+      }
+    }
+  }
+  
+  // Convert sets to arrays
+  for (const field of Object.values(schema) as any) {
+    field.types = Array.from(field.types);
+  }
+  
+  return schema;
+}
+
+function formatSchemaForCodegen(schema: any, dbType: string, targetFramework: string, includeRelationships: boolean) {
+  const result = {
+    database: dbType,
+    targetFramework,
+    generatedAt: new Date().toISOString(),
+    tables: schema,
+    suggestions: {
+      endpoints: [] as string[],
+      types: [] as string[],
+      validations: [] as string[]
+    }
+  };
+  
+  // Add framework-specific suggestions
+  for (const [tableName] of Object.entries(schema) as any) {
+    result.suggestions.endpoints.push(`GET /api/${tableName}`);
+    result.suggestions.endpoints.push(`POST /api/${tableName}`);
+    result.suggestions.endpoints.push(`PUT /api/${tableName}/:id`);
+    result.suggestions.endpoints.push(`DELETE /api/${tableName}/:id`);
+  }
+  
+  return result;
+}
+
+app.listen(3000, () => console.log("DevOmni HTTP server running on port 3000"));

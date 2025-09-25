@@ -1,0 +1,8 @@
+{
+  "database": "postgres",
+  "tables": [
+    "users"
+  ],
+  "count": 1,
+  "cachedAt": "2025-09-25T19:42:16.461Z"
+}
