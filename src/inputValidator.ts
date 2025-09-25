@@ -211,6 +211,42 @@ export const CompareDatabasesSchema = z.object({
 });
 
 /**
+ * Get Database Schema Input Schema
+ */
+export const GetDatabaseSchemaSchema = z.object({
+  database: z.enum(['postgres', 'mysql', 'mongo'], {
+    errorMap: () => ({ message: "Database must be 'postgres', 'mysql', or 'mongo'" })
+  }),
+  table_name: z.string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_.-]+$/, "Table name contains invalid characters")
+    .optional(),
+  include_sample_data: z.boolean().optional().default(false)
+});
+
+/**
+ * List Database Tables Input Schema
+ */
+export const ListDatabaseTablesSchema = z.object({
+  database: z.enum(['postgres', 'mysql', 'mongo'], {
+    errorMap: () => ({ message: "Database must be 'postgres', 'mysql', or 'mongo'" })
+  }),
+  include_row_counts: z.boolean().optional().default(false)
+});
+
+/**
+ * Export Schema for Codegen Input Schema
+ */
+export const ExportSchemaForCodegenSchema = z.object({
+  database: z.enum(['postgres', 'mysql', 'mongo'], {
+    errorMap: () => ({ message: "Database must be 'postgres', 'mysql', or 'mongo'" })
+  }),
+  target_framework: z.enum(['express', 'nextjs', 'fastapi', 'nestjs', 'generic']).optional().default('generic'),
+  include_relationships: z.boolean().optional().default(true)
+});
+
+/**
  * Utility function to validate and sanitize inputs
  */
 export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): T {

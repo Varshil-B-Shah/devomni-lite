@@ -24,19 +24,61 @@ export class MongoAdapter {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
-      family: 4 // Force IPv4
+      family: 4, // Force IPv4
+      
+      // SSL/TLS Configuration for MongoDB Atlas
+      tls: true,
+      tlsAllowInvalidCertificates: true,  // Allow invalid certificates for development
+      tlsAllowInvalidHostnames: true,     // Allow invalid hostnames for development
+      
+      // Additional Atlas-specific options
+      retryWrites: true,
+      w: 'majority',
+      
+      // Connection retry options
+      maxIdleTimeMS: 30000,
+      connectTimeoutMS: 30000,
+      
+      // Authentication options (usually handled by connection string)
+      authSource: 'admin'
     });
     this.db = this.client.db(dbName);
   }
-  
+
+  /**
+   * Check if the adapter is connected to MongoDB
+   */
+  public getConnectionStatus(): boolean {
+    return this.isConnected;
+  }
+
   async connect() {
     if (!this.isConnected) {
       try {
         await this.client.connect();
+        
+        // Test the connection by pinging the database
+        await this.client.db("admin").command({ ping: 1 });
+        
         this.isConnected = true;
       } catch (error) {
         this.isConnected = false;
-        throw new Error(`Failed to connect to MongoDB: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        
+        // Provide more specific error messages
+        let errorMessage = 'Unknown error';
+        if (error instanceof Error) {
+          if (error.message.includes('SSL')) {
+            errorMessage = `SSL/TLS connection error: ${error.message}. Try updating your connection string or checking certificate settings.`;
+          } else if (error.message.includes('authentication')) {
+            errorMessage = `Authentication failed: ${error.message}. Check your username and password.`;
+          } else if (error.message.includes('timeout')) {
+            errorMessage = `Connection timeout: ${error.message}. Check your network or MongoDB Atlas whitelist.`;
+          } else {
+            errorMessage = error.message;
+          }
+        }
+        
+        throw new Error(`Failed to connect to MongoDB: ${errorMessage}`);
       }
     }
   }

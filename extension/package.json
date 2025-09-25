@@ -1,0 +1,149 @@
+{
+  "name": "devomni-codegen",
+  "displayName": "DevOmni Code Generator",
+  "description": "AI-powered API generation using database schemas from DevOmni MCP server",
+  "version": "0.1.0",
+  "publisher": "devomni",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other",
+    "Snippets",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "database",
+    "api",
+    "codegen",
+    "ai",
+    "copilot",
+    "mcp",
+    "schema"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "devomni.generateAPIs",
+        "title": "Generate APIs from Database Schema",
+        "category": "DevOmni"
+      },
+      {
+        "command": "devomni.refreshSchema",
+        "title": "Refresh Database Schema",
+        "category": "DevOmni"
+      },
+      {
+        "command": "devomni.showSchema",
+        "title": "Show Database Schema",
+        "category": "DevOmni"
+      },
+      {
+        "command": "devomni.generateCRUD",
+        "title": "Generate CRUD APIs for Table",
+        "category": "DevOmni"
+      },
+      {
+        "command": "devomni.generateTypes",
+        "title": "Generate TypeScript Types",
+        "category": "DevOmni"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "devomni.generateAPIs",
+          "group": "devomni@1",
+          "when": "explorerResourceIsFolder"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "devomni.generateAPIs",
+          "when": "true"
+        },
+        {
+          "command": "devomni.refreshSchema",
+          "when": "true"
+        },
+        {
+          "command": "devomni.showSchema",
+          "when": "true"
+        },
+        {
+          "command": "devomni.generateCRUD",
+          "when": "true"
+        },
+        {
+          "command": "devomni.generateTypes",
+          "when": "true"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DevOmni Code Generator",
+      "properties": {
+        "devomni.mcpServerUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "URL of the DevOmni MCP server"
+        },
+        "devomni.database": {
+          "type": "string",
+          "enum": [
+            "postgres",
+            "mysql",
+            "mongo"
+          ],
+          "default": "postgres",
+          "description": "Default database type to use"
+        },
+        "devomni.targetFramework": {
+          "type": "string",
+          "enum": [
+            "express",
+            "nextjs",
+            "fastapi",
+            "nestjs",
+            "generic"
+          ],
+          "default": "nextjs",
+          "description": "Target framework for code generation"
+        },
+        "devomni.autoRefreshSchema": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh schema on workspace open"
+        },
+        "devomni.schemaCache.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable local schema caching for better performance"
+        },
+        "devomni.schemaCache.ttl": {
+          "type": "number",
+          "default": 300000,
+          "description": "Schema cache TTL in milliseconds (default: 5 minutes)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}

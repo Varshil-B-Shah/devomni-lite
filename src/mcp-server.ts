@@ -1,3 +1,8 @@
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -11,7 +16,10 @@ import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
 import { 
   UnifiedQuerySchema, 
-  CompareDatabasesSchema, 
+  CompareDatabasesSchema,
+  GetDatabaseSchemaSchema,
+  ListDatabaseTablesSchema,
+  ExportSchemaForCodegenSchema,
   validateInput,
   logSecurityEvent 
 } from "./inputValidator.js";
@@ -29,6 +37,382 @@ const mongoDb = new MongoAdapter(
   process.env.MONGODB_URI!,
   process.env.MONGODB_DATABASE!
 );
+
+// Schema extraction functions
+async function getPostgresSchema(tableName?: string, includeSampleData = false) {
+  try {
+    let query;
+    let params: any[] = [];
+    
+    if (tableName) {
+      query = `
+        SELECT 
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.is_nullable,
+          c.column_default,
+          c.character_maximum_length,
+          c.numeric_precision,
+          c.numeric_scale,
+          tc.constraint_type,
+          kcu.referenced_table_name,
+          kcu.referenced_column_name
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu 
+          ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+        LEFT JOIN information_schema.table_constraints tc 
+          ON kcu.constraint_name = tc.constraint_name
+        WHERE c.table_schema = 'public' AND c.table_name = $1
+        ORDER BY c.table_name, c.ordinal_position
+      `;
+      params = [tableName];
+    } else {
+      query = `
+        SELECT 
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.is_nullable,
+          c.column_default,
+          c.character_maximum_length,
+          c.numeric_precision,
+          c.numeric_scale,
+          tc.constraint_type,
+          kcu.referenced_table_name,
+          kcu.referenced_column_name
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu 
+          ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+        LEFT JOIN information_schema.table_constraints tc 
+          ON kcu.constraint_name = tc.constraint_name
+        WHERE c.table_schema = 'public'
+        ORDER BY c.table_name, c.ordinal_position
+      `;
+    }
+
+    const result = await pgDb.query(query, params);
+    const schema = organizeSchemaData(result.rows, 'postgres');
+    
+    if (includeSampleData && tableName) {
+      const sampleQuery = `SELECT * FROM ${tableName} LIMIT 3`;
+      const sampleResult = await pgDb.query(sampleQuery);
+      schema[tableName] = { ...schema[tableName], sampleData: sampleResult.rows };
+    }
+    
+    return schema;
+  } catch (error) {
+    throw new Error(`Failed to get PostgreSQL schema: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function getMySQLSchema(tableName?: string, includeSampleData = false) {
+  try {
+    let query;
+    let params: any[] = [];
+    
+    if (tableName) {
+      query = `
+        SELECT 
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.is_nullable,
+          c.column_default,
+          c.character_maximum_length,
+          c.numeric_precision,
+          c.numeric_scale,
+          c.column_key,
+          kcu.referenced_table_name,
+          kcu.referenced_column_name
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu 
+          ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+        WHERE c.table_schema = DATABASE() AND c.table_name = ?
+        ORDER BY c.table_name, c.ordinal_position
+      `;
+      params = [tableName];
+    } else {
+      query = `
+        SELECT 
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.is_nullable,
+          c.column_default,
+          c.character_maximum_length,
+          c.numeric_precision,
+          c.numeric_scale,
+          c.column_key,
+          kcu.referenced_table_name,
+          kcu.referenced_column_name
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu 
+          ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+        WHERE c.table_schema = DATABASE()
+        ORDER BY c.table_name, c.ordinal_position
+      `;
+    }
+
+    const result = await mysqlDb.query(query, params);
+    const schema = organizeSchemaData((result as any).rows || result, 'mysql');
+    
+    if (includeSampleData && tableName) {
+      const sampleQuery = `SELECT * FROM ${tableName} LIMIT 3`;
+      const sampleResult = await mysqlDb.query(sampleQuery);
+      schema[tableName] = { ...schema[tableName], sampleData: (sampleResult as any).rows || sampleResult };
+    }
+    
+    return schema;
+  } catch (error) {
+    throw new Error(`Failed to get MySQL schema: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function getMongoSchema(collectionName?: string, includeSampleData = false) {
+  try {
+    const collections = collectionName ? [collectionName] : await mongoDb.listCollections();
+    const schema: any = {};
+    
+    for (const collection of collections) {
+      // Get sample documents to infer schema
+      const sampleDocs = await mongoDb.find(collection, {});
+      const inferredSchema = inferMongoSchema(sampleDocs);
+      
+      schema[collection] = {
+        type: 'collection',
+        fields: inferredSchema,
+        documentCount: sampleDocs.length
+      };
+      
+      if (includeSampleData) {
+        schema[collection].sampleData = sampleDocs.slice(0, 3);
+      }
+    }
+    
+    return schema;
+  } catch (error) {
+    throw new Error(`Failed to get MongoDB schema: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function getPostgresTables(includeRowCounts = false) {
+  try {
+    const query = `
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `;
+    
+    const result = await pgDb.query(query);
+    const tables = result.rows.map((row: any) => ({ 
+      name: row.table_name, 
+      type: 'table',
+      rowCount: undefined as number | null | undefined
+    }));
+    
+    if (includeRowCounts) {
+      for (const table of tables) {
+        try {
+          const countResult = await pgDb.query(`SELECT COUNT(*) as count FROM ${table.name}`);
+          table.rowCount = parseInt(countResult.rows[0].count);
+        } catch {
+          table.rowCount = null;
+        }
+      }
+    }
+    
+    return { database: 'postgres', tables };
+  } catch (error) {
+    throw new Error(`Failed to get PostgreSQL tables: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function getMySQLTables(includeRowCounts = false) {
+  try {
+    const query = `
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `;
+    
+    const result = await mysqlDb.query(query);
+    const tables = ((result as any).rows || result).map((row: any) => ({ 
+      name: row.table_name, 
+      type: 'table',
+      rowCount: undefined as number | null | undefined
+    }));
+    
+    if (includeRowCounts) {
+      for (const table of tables) {
+        try {
+          const countResult = await mysqlDb.query(`SELECT COUNT(*) as count FROM ${table.name}`);
+          const rows = (countResult as any).rows || countResult;
+          table.rowCount = parseInt(rows[0].count);
+        } catch {
+          table.rowCount = null;
+        }
+      }
+    }
+    
+    return { database: 'mysql', tables };
+  } catch (error) {
+    throw new Error(`Failed to get MySQL tables: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function getMongoTables(includeRowCounts = false) {
+  try {
+    const collections = await mongoDb.listCollections();
+    const tables = collections.map(name => ({ 
+      name, 
+      type: 'collection',
+      rowCount: undefined as string | null | undefined
+    }));
+    
+    if (includeRowCounts) {
+      for (const table of tables) {
+        try {
+          const docs = await mongoDb.find(table.name, {});
+          // For performance, we'll use a rough estimate rather than counting all documents
+          table.rowCount = `~${docs.length}+`;
+        } catch {
+          table.rowCount = null;
+        }
+      }
+    }
+    
+    return { database: 'mongo', tables };
+  } catch (error) {
+    throw new Error(`Failed to get MongoDB collections: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function exportPostgresForCodegen(targetFramework = 'generic', includeRelationships = true) {
+  try {
+    const schema = await getPostgresSchema();
+    return formatSchemaForCodegen(schema, 'postgres', targetFramework, includeRelationships);
+  } catch (error) {
+    throw new Error(`Failed to export PostgreSQL schema for codegen: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function exportMySQLForCodegen(targetFramework = 'generic', includeRelationships = true) {
+  try {
+    const schema = await getMySQLSchema();
+    return formatSchemaForCodegen(schema, 'mysql', targetFramework, includeRelationships);
+  } catch (error) {
+    throw new Error(`Failed to export MySQL schema for codegen: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function exportMongoForCodegen(targetFramework = 'generic', includeRelationships = true) {
+  try {
+    const schema = await getMongoSchema();
+    return formatSchemaForCodegen(schema, 'mongo', targetFramework, includeRelationships);
+  } catch (error) {
+    throw new Error(`Failed to export MongoDB schema for codegen: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+// Helper functions
+function organizeSchemaData(rows: any[], dbType: string) {
+  const schema: any = {};
+  
+  for (const row of rows) {
+    const tableName = row.table_name;
+    if (!schema[tableName]) {
+      schema[tableName] = {
+        type: 'table',
+        columns: {}
+      };
+    }
+    
+    schema[tableName].columns[row.column_name] = {
+      type: row.data_type,
+      nullable: row.is_nullable === 'YES',
+      default: row.column_default,
+      maxLength: row.character_maximum_length,
+      precision: row.numeric_precision,
+      scale: row.numeric_scale,
+      key: dbType === 'mysql' ? row.column_key : row.constraint_type,
+      references: row.referenced_table_name ? {
+        table: row.referenced_table_name,
+        column: row.referenced_column_name
+      } : null
+    };
+  }
+  
+  return schema;
+}
+
+function inferMongoSchema(documents: any[]) {
+  const schema: any = {};
+  
+  for (const doc of documents) {
+    for (const [key, value] of Object.entries(doc)) {
+      if (!schema[key]) {
+        schema[key] = {
+          types: new Set(),
+          nullable: false,
+          examples: []
+        };
+      }
+      
+      if (value === null || value === undefined) {
+        schema[key].nullable = true;
+      } else {
+        schema[key].types.add(typeof value);
+        if (schema[key].examples.length < 3) {
+          schema[key].examples.push(value);
+        }
+      }
+    }
+  }
+  
+  // Convert sets to arrays for JSON serialization
+  for (const field of Object.values(schema) as any) {
+    field.types = Array.from(field.types);
+  }
+  
+  return schema;
+}
+
+function formatSchemaForCodegen(schema: any, dbType: string, targetFramework: string, includeRelationships: boolean) {
+  const result = {
+    database: dbType,
+    targetFramework,
+    generatedAt: new Date().toISOString(),
+    tables: schema,
+    suggestions: {
+      endpoints: [] as string[],
+      types: [] as string[],
+      validations: [] as string[]
+    }
+  };
+  
+  // Add framework-specific suggestions
+  for (const [tableName, tableData] of Object.entries(schema) as any) {
+    result.suggestions.endpoints.push(`GET /api/${tableName}`);
+    result.suggestions.endpoints.push(`POST /api/${tableName}`);
+    result.suggestions.endpoints.push(`PUT /api/${tableName}/:id`);
+    result.suggestions.endpoints.push(`DELETE /api/${tableName}/:id`);
+    
+    if (targetFramework === 'nextjs') {
+      result.suggestions.types.push(`interface ${capitalize(tableName)} { ... }`);
+    } else if (targetFramework === 'express') {
+      result.suggestions.types.push(`type ${capitalize(tableName)}Type = { ... }`);
+    }
+  }
+  
+  return result;
+}
+
+function capitalize(str: string) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
 
 function formatResult(result: any): string {
   if (Array.isArray(result)) {
@@ -133,6 +517,79 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["db1", "db2"],
         },
       },
+      {
+        name: "get_database_schema",
+        description:
+          "Extract complete database schema for AI code generation. Returns table/collection structures, column types, and relationships.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Which database to extract schema from",
+            },
+            table_name: {
+              type: "string",
+              description: "Specific table/collection name (optional, if not provided returns all tables)",
+            },
+            include_sample_data: {
+              type: "boolean",
+              description: "Include sample data for better API generation context (default: false)",
+              default: false
+            }
+          },
+          required: ["database"],
+        },
+      },
+      {
+        name: "list_database_tables",
+        description:
+          "List all tables/collections in a database for schema exploration and API generation planning.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Which database to list tables from",
+            },
+            include_row_counts: {
+              type: "boolean",
+              description: "Include row counts for each table (default: false)",
+              default: false
+            }
+          },
+          required: ["database"],
+        },
+      },
+      {
+        name: "export_schema_for_codegen",
+        description:
+          "Export database schema in a format optimized for AI code generation. Returns structured schema with TypeScript types, validation rules, and API suggestions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Which database to export schema from",
+            },
+            target_framework: {
+              type: "string",
+              enum: ["express", "nextjs", "fastapi", "nestjs", "generic"],
+              description: "Target framework for optimized schema format (default: generic)",
+              default: "generic"
+            },
+            include_relationships: {
+              type: "boolean",
+              description: "Include foreign key relationships and suggestions (default: true)",
+              default: true
+            }
+          },
+          required: ["database"],
+        },
+      },
     ],
   };
 });
@@ -230,6 +687,92 @@ server.setRequestHandler(
                 type: "text",
                 text: "Result from " + db2 + ":\n" + formatResult(result2),
               },
+            ],
+          };
+        }
+        case "get_database_schema": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(GetDatabaseSchemaSchema, args);
+          const { database, table_name, include_sample_data } = validatedArgs;
+          
+          // Log the schema request for security monitoring
+          logSecurityEvent("get_database_schema_attempt", {
+            database,
+            table_name: table_name || "all_tables",
+            include_sample_data: !!include_sample_data
+          });
+
+          let schemaResult;
+          if (database === "postgres") {
+            schemaResult = await getPostgresSchema(table_name, include_sample_data);
+          } else if (database === "mysql") {
+            schemaResult = await getMySQLSchema(table_name, include_sample_data);
+          } else if (database === "mongo") {
+            schemaResult = await getMongoSchema(table_name, include_sample_data);
+          } else {
+            throw new Error("Unknown database type");
+          }
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(schemaResult, null, 2) },
+            ],
+          };
+        }
+        case "list_database_tables": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(ListDatabaseTablesSchema, args);
+          const { database, include_row_counts } = validatedArgs;
+          
+          // Log the tables list request for security monitoring
+          logSecurityEvent("list_database_tables_attempt", {
+            database,
+            include_row_counts: !!include_row_counts
+          });
+
+          let tablesResult;
+          if (database === "postgres") {
+            tablesResult = await getPostgresTables(include_row_counts);
+          } else if (database === "mysql") {
+            tablesResult = await getMySQLTables(include_row_counts);
+          } else if (database === "mongo") {
+            tablesResult = await getMongoTables(include_row_counts);
+          } else {
+            throw new Error("Unknown database type");
+          }
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(tablesResult, null, 2) },
+            ],
+          };
+        }
+        case "export_schema_for_codegen": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(ExportSchemaForCodegenSchema, args);
+          const { database, target_framework, include_relationships } = validatedArgs;
+          
+          // Log the codegen export request for security monitoring
+          logSecurityEvent("export_schema_for_codegen_attempt", {
+            database,
+            target_framework: target_framework || "generic",
+            include_relationships: !!include_relationships
+          });
+
+          let codegenSchema;
+          if (database === "postgres") {
+            codegenSchema = await exportPostgresForCodegen(target_framework, include_relationships);
+          } else if (database === "mysql") {
+            codegenSchema = await exportMySQLForCodegen(target_framework, include_relationships);
+          } else if (database === "mongo") {
+            codegenSchema = await exportMongoForCodegen(target_framework, include_relationships);
+          } else {
+            throw new Error("Unknown database type");
+          }
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(codegenSchema, null, 2) },
             ],
           };
         }

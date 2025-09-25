@@ -29,13 +29,23 @@ describe('MongoAdapter', () => {
       collection: jest.fn().mockReturnValue(mockCollection),
       listCollections: jest.fn().mockReturnValue({
         toArray: jest.fn()
-      })
+      }),
+      command: jest.fn().mockResolvedValue({ ok: 1 }) // Mock for ping command
     };
 
     mockClient = {
       connect: jest.fn().mockResolvedValue(undefined),
       close: jest.fn().mockResolvedValue(undefined),
-      db: jest.fn().mockReturnValue(mockDb)
+      db: jest.fn((dbName) => {
+        if (dbName === "admin") {
+          // Return admin db mock with command method
+          return {
+            command: jest.fn().mockResolvedValue({ ok: 1 })
+          };
+        }
+        // Return main database mock
+        return mockDb;
+      })
     };
 
     const { MongoClient } = require('mongodb');
@@ -51,7 +61,19 @@ describe('MongoAdapter', () => {
         maxPoolSize: 10,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
-        family: 4
+        family: 4,
+        // SSL/TLS Configuration for MongoDB Atlas
+        tls: true,
+        tlsAllowInvalidCertificates: true,
+        tlsAllowInvalidHostnames: true,
+        // Additional Atlas-specific options
+        retryWrites: true,
+        w: 'majority',
+        // Connection retry options
+        maxIdleTimeMS: 30000,
+        connectTimeoutMS: 30000,
+        // Authentication options
+        authSource: 'admin'
       });
     });
 
