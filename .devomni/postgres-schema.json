@@ -1,6 +1,6 @@
 {
   "database": "postgres",
-  "generatedAt": "2025-09-25T19:42:16.456Z",
+  "generatedAt": "2025-09-25T21:15:56.565Z",
   "tables": {
     "users": {
       "type": "table",
@@ -35,5 +35,5 @@
       }
     }
   },
-  "cachedAt": "2025-09-25T19:42:16.459Z"
+  "cachedAt": "2025-09-25T21:15:56.571Z"
 }

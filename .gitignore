@@ -22,6 +22,8 @@ out/
 .idea/
 .DS_Store
 
+.devomni
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

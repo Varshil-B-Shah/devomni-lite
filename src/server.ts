@@ -33,9 +33,21 @@ const mongoDb = new MongoAdapter(
   process.env.MONGODB_DATABASE!
 );
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  console.log('🏥 Health check requested');
+  res.json({ status: 'OK', message: 'DevOmni HTTP server is running', port: 3000 });
+});
+
 // MCP Tool endpoint for VS Code extension
 app.post("/mcp-tool", async (req, res) => {
   const { toolName, arguments: args } = req.body;
+  
+  // Debug logging
+  console.log('🔍 HTTP Request Debug:');
+  console.log('  Tool Name:', toolName);
+  console.log('  Arguments:', JSON.stringify(args, null, 2));
+  console.log('  Full Body:', JSON.stringify(req.body, null, 2));
   
   try {
     let result;
@@ -116,6 +128,11 @@ app.post("/mcp-tool", async (req, res) => {
     res.json(result);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error('❌ HTTP Server Error:');
+    console.error('  Error:', errorMessage);
+    console.error('  Stack:', error instanceof Error ? error.stack : 'No stack');
+    console.error('  Tool Name:', toolName);
+    console.error('  Arguments:', JSON.stringify(args, null, 2));
     res.status(500).json({ error: errorMessage });
   }
 });

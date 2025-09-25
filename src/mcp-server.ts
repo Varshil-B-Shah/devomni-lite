@@ -55,9 +55,7 @@ async function getPostgresSchema(tableName?: string, includeSampleData = false) 
           c.character_maximum_length,
           c.numeric_precision,
           c.numeric_scale,
-          tc.constraint_type,
-          kcu.referenced_table_name,
-          kcu.referenced_column_name
+          tc.constraint_type
         FROM information_schema.columns c
         LEFT JOIN information_schema.key_column_usage kcu 
           ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
@@ -78,9 +76,7 @@ async function getPostgresSchema(tableName?: string, includeSampleData = false) 
           c.character_maximum_length,
           c.numeric_precision,
           c.numeric_scale,
-          tc.constraint_type,
-          kcu.referenced_table_name,
-          kcu.referenced_column_name
+          tc.constraint_type
         FROM information_schema.columns c
         LEFT JOIN information_schema.key_column_usage kcu 
           ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name

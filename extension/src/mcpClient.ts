@@ -83,7 +83,7 @@ export class McpClient {
                 name: 'list_database_tables',
                 arguments: {
                     database,
-                    includeRowCounts: includeRowCounts  // Fixed parameter name
+                    include_row_counts: includeRowCounts  // Fixed parameter name to match server expectation
                 }
             };
 
