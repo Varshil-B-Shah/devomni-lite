@@ -23,6 +23,8 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
 - **Comprehensive error handling:** Clear, secure error messages
 - **Security testing:** Built-in security test suite
 - **Cloud workspace integration (optional):** Claude can connect to Notion for project management, notes, and automation using the Notion MCP server.
+- **Filesystem integration (optional):** Claude can access, search, and organize your local files or Obsidian vaults via the Filesystem MCP server for AI-powered file management and persistent memory.
+- **Cloud workspace integration (optional):** Claude can connect to Notion for project management, notes, and automation using the Notion MCP server.
 
 ## Getting Started
 1. **Clone the repo**
@@ -124,7 +126,6 @@ Run the comprehensive Jest security test suite to validate all protections:
 ```bash
 npm test
 ```
-
 For additional testing options:
 ```bash
 npm run test:coverage    # Run tests with coverage report
