@@ -40,19 +40,187 @@ import {
   logSecurityEvent 
 } from "./inputValidator.js";
 
-const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
+/**
+ * Connection Profile Manager
+ * 
+ * WHY CONNECTION PROFILES:
+ * - Enables multi-project support with different databases
+ * - Single MCP server can serve multiple projects
+ * - Clean separation of connection configurations
+ * - Easy switching between dev/staging/production environments
+ * 
+ * ALTERNATIVE: Single hardcoded connections
+ * ❌ Problem: Only works with one database per type
+ * ❌ Problem: Can't support multiple projects
+ * ❌ Problem: Manual server restart needed for different databases
+ */
+class ConnectionManager {
+  private connections: Map<string, any> = new Map();
 
-const mysqlDb = new MySQLAdapter({
-  host: process.env.MYSQL_HOST!,
-  port: Number(process.env.MYSQL_PORT!),
-  user: process.env.MYSQL_USER!,
-  password: process.env.MYSQL_PASSWORD!,
-  database: process.env.MYSQL_DATABASE!,
-});
-const mongoDb = new MongoAdapter(
-  process.env.MONGODB_URI!,
-  process.env.MONGODB_DATABASE!
-);
+  constructor() {
+    this.initializeConnections();
+  }
+
+  /**
+   * Initialize all available connections from environment variables
+   * 
+   * WHY ENVIRONMENT VARIABLE PARSING:
+   * - Follows 12-factor app methodology
+   * - Easy to configure different environments
+   * - Secure (no hardcoded credentials in code)
+   * - Standard practice for connection management
+   * 
+   * ALTERNATIVE: Configuration files
+   * ❌ Problem: Risk of committing credentials to version control
+   * ❌ Problem: More complex deployment configuration
+   */
+  private initializeConnections() {
+    // Parse PostgreSQL connections
+    Object.keys(process.env).forEach(key => {
+      if (key.startsWith('PG_CONNECTION_STRING')) {
+        const profileName = key === 'PG_CONNECTION_STRING' ? 'default' : 
+          key.replace('PG_CONNECTION_STRING_', '').toLowerCase();
+        
+        this.connections.set(`postgres_${profileName}`, 
+          new PostgresAdapter(process.env[key]!)
+        );
+      }
+    });
+
+    // Parse MySQL connections
+    const mysqlProfiles = this.extractMySQLProfiles();
+    mysqlProfiles.forEach(profile => {
+      this.connections.set(`mysql_${profile.name}`, 
+        new MySQLAdapter(profile.config)
+      );
+    });
+
+    // Parse MongoDB connections  
+    Object.keys(process.env).forEach(key => {
+      if (key.startsWith('MONGODB_URI')) {
+        const profileName = key === 'MONGODB_URI' ? 'default' :
+          key.replace('MONGODB_URI_', '').toLowerCase();
+        
+        const dbName = process.env[key.replace('URI', 'DATABASE')] || 
+          process.env.MONGODB_DATABASE || 'defaultdb';
+        
+        this.connections.set(`mongo_${profileName}`,
+          new MongoAdapter(process.env[key]!, dbName)
+        );
+      }
+    });
+
+    console.error(`Initialized ${this.connections.size} database connections`);
+  }
+
+  /**
+   * Extract MySQL profiles from environment variables
+   * 
+   * WHY GROUPED MYSQL CONFIG:
+   * - MySQL requires multiple environment variables per connection
+   * - Need to group related variables by profile name
+   * - Supports both simple and complex MySQL configurations
+   */
+  private extractMySQLProfiles() {
+    const profiles = new Map<string, any>();
+    
+    // Default MySQL connection
+    if (process.env.MYSQL_HOST) {
+      profiles.set('default', {
+        host: process.env.MYSQL_HOST,
+        port: Number(process.env.MYSQL_PORT) || 3306,
+        user: process.env.MYSQL_USER,
+        password: process.env.MYSQL_PASSWORD,
+        database: process.env.MYSQL_DATABASE
+      });
+    }
+
+    // Named MySQL profiles
+    Object.keys(process.env).forEach(key => {
+      const match = key.match(/^MYSQL_HOST_(.+)$/);
+      if (match && match[1]) {
+        const profileName = match[1].toLowerCase();
+        const profile = {
+          host: process.env[key],
+          port: Number(process.env[`MYSQL_PORT_${match[1]}`]) || 3306,
+          user: process.env[`MYSQL_USER_${match[1]}`],
+          password: process.env[`MYSQL_PASSWORD_${match[1]}`],
+          database: process.env[`MYSQL_DATABASE_${match[1]}`]
+        };
+        
+        profiles.set(profileName, profile);
+      }
+    });
+
+    return Array.from(profiles.entries()).map(([name, config]) => ({ name, config }));
+  }
+
+  /**
+   * Get database adapter for specific database and profile
+   */
+  getConnection(database: string, profile: string = 'default'): any {
+    const key = `${database}_${profile}`;
+    const connection = this.connections.get(key);
+    
+    if (!connection) {
+      throw new Error(`No connection found for ${database} profile '${profile}'. Available profiles: ${this.getAvailableProfiles(database).join(', ')}`);
+    }
+    
+    return connection;
+  }
+
+  /**
+   * List available profiles for a database type
+   */
+  getAvailableProfiles(database: string): string[] {
+    const profiles: string[] = [];
+    
+    this.connections.forEach((_, key) => {
+      if (key.startsWith(`${database}_`)) {
+        profiles.push(key.replace(`${database}_`, ''));
+      }
+    });
+    
+    return profiles;
+  }
+
+  /**
+   * Get all available connection profiles
+   */
+  getAllProfiles() {
+    const profiles: Array<{
+      name: string;
+      database: 'postgres' | 'mysql' | 'mongo';
+      displayName: string;
+      description?: string;
+    }> = [];
+
+    this.connections.forEach((_, key) => {
+      const parts = key.split('_');
+      const database = parts[0];
+      const profile = parts.slice(1).join('_'); // Handle profiles with underscores
+      
+      if (database && profile) {
+        profiles.push({
+          name: profile,
+          database: database as 'postgres' | 'mysql' | 'mongo',
+          displayName: `${database.toUpperCase()} (${profile})`,
+          description: `${database} connection profile: ${profile}`
+        });
+      }
+    });
+
+    return profiles;
+  }
+}
+
+// Initialize connection manager
+const connectionManager = new ConnectionManager();
+
+// Backward compatibility - keep existing connections for default profile
+const pgDb = connectionManager.getConnection('postgres', 'default');
+const mysqlDb = connectionManager.getConnection('mysql', 'default');
+const mongoDb = connectionManager.getConnection('mongo', 'default');
 
 // Schema extraction functions
 async function getPostgresSchema(tableName?: string, includeSampleData = false) {
@@ -278,7 +446,7 @@ async function getMySQLTables(includeRowCounts = false) {
 async function getMongoTables(includeRowCounts = false) {
   try {
     const collections = await mongoDb.listCollections();
-    const tables = collections.map(name => ({ 
+    const tables = collections.map((name: string) => ({ 
       name, 
       type: 'collection',
       rowCount: undefined as string | null | undefined
@@ -602,6 +770,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["database"],
         },
       },
+      {
+        name: "list_connection_profiles",
+        description:
+          "List all available database connection profiles configured in the DevOmni MCP server. Used by VS Code extension to show available database connections for project setup.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+      },
     ],
   };
 });
@@ -785,6 +963,22 @@ server.setRequestHandler(
           return {
             content: [
               { type: "text", text: JSON.stringify(codegenSchema, null, 2) },
+            ],
+          };
+        }
+        case "list_connection_profiles": {
+          // No input validation needed - this tool takes no arguments
+          
+          // Log the profiles list request for security monitoring
+          logSecurityEvent("list_connection_profiles_attempt", {
+            timestamp: new Date().toISOString()
+          });
+
+          const profiles = connectionManager.getAllProfiles();
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(profiles, null, 2) },
             ],
           };
         }

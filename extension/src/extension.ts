@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { McpClient } from './mcpClient'; 
 import { SchemaCache } from './schemaCache'; 
 import { CodeGenerator } from './codeGenerator';
+import { ConfigManager } from './configManager';
+import { ProjectSetupWizard } from './projectSetupWizard';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('DevOmni Code Generator extension is now active!');
@@ -9,6 +11,8 @@ export function activate(context: vscode.ExtensionContext) {
     const mcpClient = new McpClient();
     const schemaCache = new SchemaCache(context);
     const codeGenerator = new CodeGenerator();
+    const configManager = new ConfigManager(mcpClient);
+    const projectSetupWizard = new ProjectSetupWizard(configManager);
 
     // Register commands
     const generateAPIsCommand = vscode.commands.registerCommand('devomni.generateAPIs', async () => {
@@ -51,13 +55,100 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // New configuration commands
+    const setupProjectCommand = vscode.commands.registerCommand('devomni.setupProject', async () => {
+        try {
+            await projectSetupWizard.startSetupWizard();
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to setup project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const switchDatabaseCommand = vscode.commands.registerCommand('devomni.switchDatabase', async () => {
+        try {
+            const currentConfig = configManager.getCurrentConfig();
+            const profiles = await configManager.getAvailableProfiles();
+            
+            const databaseTypes = [...new Set(profiles.map(p => p.database))];
+            const selectedDatabase = await vscode.window.showQuickPick(databaseTypes, {
+                placeHolder: 'Select database type',
+                title: 'Switch Database Type'
+            });
+
+            if (selectedDatabase && ['postgres', 'mysql', 'mongo'].includes(selectedDatabase)) {
+                await configManager.updateConfig({ database: selectedDatabase as 'postgres' | 'mysql' | 'mongo' });
+                vscode.window.showInformationMessage(`Database switched to ${selectedDatabase}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to switch database: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const switchFrameworkCommand = vscode.commands.registerCommand('devomni.switchFramework', async () => {
+        try {
+            const frameworks = ['express', 'nextjs', 'fastapi', 'nestjs', 'generic'];
+            const selectedFramework = await vscode.window.showQuickPick(frameworks, {
+                placeHolder: 'Select target framework',
+                title: 'Switch Target Framework'
+            });
+
+            if (selectedFramework && frameworks.includes(selectedFramework)) {
+                await configManager.updateConfig({ targetFramework: selectedFramework as 'express' | 'nextjs' | 'fastapi' | 'nestjs' | 'generic' });
+                vscode.window.showInformationMessage(`Framework switched to ${selectedFramework}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to switch framework: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const manageProfilesCommand = vscode.commands.registerCommand('devomni.manageProfiles', async () => {
+        try {
+            const profiles = await configManager.getAvailableProfiles();
+            const items = profiles.map(p => ({
+                label: p.displayName,
+                description: p.description,
+                detail: `Database: ${p.database} | Profile: ${p.name}`
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'View available connection profiles',
+                title: 'Connection Profile Manager'
+            });
+
+            if (selected) {
+                vscode.window.showInformationMessage(`Selected: ${selected.label}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to manage profiles: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const testConnectionCommand = vscode.commands.registerCommand('devomni.testConnection', async () => {
+        try {
+            const isValid = await configManager.testConnection();
+            
+            if (isValid) {
+                vscode.window.showInformationMessage('✅ Database connection successful!');
+            } else {
+                vscode.window.showWarningMessage('❌ Database connection failed. Check your configuration.');
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to test connection: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
     // Add to subscriptions
     context.subscriptions.push(
         generateAPIsCommand,
         refreshSchemaCommand,
         showSchemaCommand,
         generateCRUDCommand,
-        generateTypesCommand
+        generateTypesCommand,
+        setupProjectCommand,
+        switchDatabaseCommand,
+        switchFrameworkCommand,
+        manageProfilesCommand,
+        testConnectionCommand
     );
 
     // Auto-refresh schema on activation if enabled

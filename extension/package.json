@@ -51,6 +51,36 @@
         "command": "devomni.generateTypes",
         "title": "Generate TypeScript Types",
         "category": "DevOmni"
+      },
+      {
+        "command": "devomni.setupProject",
+        "title": "Setup Project Configuration",
+        "category": "DevOmni",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "devomni.switchDatabase",
+        "title": "Switch Database Type",
+        "category": "DevOmni",
+        "icon": "$(database)"
+      },
+      {
+        "command": "devomni.switchFramework",
+        "title": "Switch Target Framework",
+        "category": "DevOmni",
+        "icon": "$(code)"
+      },
+      {
+        "command": "devomni.manageProfiles",
+        "title": "Manage Connection Profiles",
+        "category": "DevOmni",
+        "icon": "$(settings)"
+      },
+      {
+        "command": "devomni.testConnection",
+        "title": "Test Database Connection",
+        "category": "DevOmni",
+        "icon": "$(plug)"
       }
     ],
     "menus": {
@@ -106,6 +136,11 @@
           "type": "string",
           "default": "generated",
           "description": "Directory where generated files will be placed (relative to workspace root)"
+        },
+        "devomni.connectionProfile": {
+          "type": "string",
+          "default": "default",
+          "description": "Connection profile to use (corresponds to profiles in DevOmni MCP server)"
         },
         "devomni.targetFramework": {
           "type": "string",

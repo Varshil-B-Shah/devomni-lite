@@ -160,6 +160,18 @@ export class McpClient {
         }
     }
 
+    /**
+     * Public method to call any MCP tool
+     * Used by ConfigManager and other components that need to call custom tools
+     */
+    async callTool(toolName: string, args: any): Promise<any> {
+        const payload = {
+            name: toolName,
+            arguments: args
+        };
+        return this.callMcpTool(payload);
+    }
+
     private async callMcpTool(payload: any): Promise<any> {
         try {
             // For HTTP server version, we'll use the /mcp-tool endpoint
