@@ -111,6 +111,36 @@
         "title": "Setup MCP Integration for GitHub Copilot",
         "category": "DevOmni",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "devomni.listProfiles",
+        "title": "List Database Profiles",
+        "category": "DevOmni",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "devomni.switchProfile",
+        "title": "Switch Database Profile",
+        "category": "DevOmni",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "devomni.createProfile",
+        "title": "Create Database Profile",
+        "category": "DevOmni",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devomni.deleteProfile",
+        "title": "Delete Database Profile",
+        "category": "DevOmni",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devomni.showActiveProfile",
+        "title": "Show Active Database Profile",
+        "category": "DevOmni",
+        "icon": "$(check-all)"
       }
     ],
     "menus": {
@@ -140,6 +170,26 @@
         },
         {
           "command": "devomni.generateTypes",
+          "when": "true"
+        },
+        {
+          "command": "devomni.listProfiles",
+          "when": "true"
+        },
+        {
+          "command": "devomni.switchProfile",
+          "when": "true"
+        },
+        {
+          "command": "devomni.createProfile",
+          "when": "true"
+        },
+        {
+          "command": "devomni.deleteProfile",
+          "when": "true"
+        },
+        {
+          "command": "devomni.showActiveProfile",
           "when": "true"
         }
       ]

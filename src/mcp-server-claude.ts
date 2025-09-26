@@ -13,6 +13,7 @@ import { PostgresAdapter } from './postgresAdapter.js';
 import { MySQLAdapter } from './mysqlAdapter.js';
 import { MongoAdapter } from './mongoAdapter.js';
 import { SharedContextStorage } from './sharedContextStorage.js';
+import { ProfileManager } from './profileManager.js';
 import { validateInput } from './inputValidator.js';
 
 // Validation schemas
@@ -37,14 +38,73 @@ function logSecurityEvent(event: string, details: any) {
   console.error(`[SECURITY] ${timestamp} - ${event}:`, JSON.stringify(details));
 }
 
-// Connection Manager for database connections
+// Enhanced Connection Manager with Profile Support
 class ConnectionManager {
   private connections = new Map<string, any>();
+  private profileManager: ProfileManager;
 
   constructor() {
-    this.initializeFromEnvironment();
+    this.profileManager = new ProfileManager();
+    this.initializeConnections();
   }
 
+  private async initializeConnections() {
+    try {
+      const config = await this.profileManager.getAllProfiles();
+      let connectionCount = 0;
+
+      // Initialize connections for all profiles
+      for (const [profileName, databases] of Object.entries(config.profiles)) {
+        // PostgreSQL connections
+        if (databases.postgres) {
+          try {
+            const adapter = new PostgresAdapter(databases.postgres);
+            this.connections.set(`postgres_${profileName}`, adapter);
+            connectionCount++;
+          } catch (error) {
+            console.error(`Failed to initialize PostgreSQL connection for profile '${profileName}': ${error}`);
+          }
+        }
+
+        // MySQL connections
+        if (databases.mysql) {
+          try {
+            const config = databases.mysql.includes('mysql://') 
+              ? { uri: databases.mysql } 
+              : JSON.parse(databases.mysql);
+            const adapter = new MySQLAdapter(config);
+            this.connections.set(`mysql_${profileName}`, adapter);
+            connectionCount++;
+          } catch (error) {
+            console.error(`Failed to initialize MySQL connection for profile '${profileName}': ${error}`);
+          }
+        }
+
+        // MongoDB connections
+        if (databases.mongo) {
+          try {
+            // Extract database name from MongoDB URI or use default
+            const dbName = databases.mongo.split('/').pop()?.split('?')[0] || 'defaultdb';
+            const adapter = new MongoAdapter(databases.mongo, dbName);
+            this.connections.set(`mongo_${profileName}`, adapter);
+            connectionCount++;
+          } catch (error) {
+            console.error(`Failed to initialize MongoDB connection for profile '${profileName}': ${error}`);
+          }
+        }
+      }
+
+      console.error(`Initialized ${connectionCount} database connections from profiles`);
+    } catch (error) {
+      console.error(`Error initializing connections from profiles: ${error}`);
+      // Fallback to environment-based initialization
+      this.initializeFromEnvironment();
+    }
+  }
+
+  /**
+   * Fallback: Initialize from environment variables (backward compatibility)
+   */
   private initializeFromEnvironment() {
     const envVars = process.env;
     let connectionCount = 0;
@@ -67,7 +127,6 @@ class ConnectionManager {
         const profileName = key === 'MYSQL_CONNECTION_STRING' ? 'default' :
           key.replace('MYSQL_', '').replace('_CONNECTION_STRING', '').toLowerCase();
         
-        // Parse MySQL connection string or create config object
         const config = value.includes('mysql://') ? { uri: value } : JSON.parse(value);
         const adapter = new MySQLAdapter(config);
         this.connections.set(`mysql_${profileName}`, adapter);
@@ -90,18 +149,26 @@ class ConnectionManager {
       }
     });
 
-    console.error(`Initialized ${connectionCount} database connections`);
+    console.error(`Initialized ${connectionCount} database connections from environment`);
   }
 
   /**
    * Get database adapter for specific database and profile
    */
-  getConnection(database: string, profile: string = 'default'): any {
-    const key = `${database}_${profile}`;
-    const connection = this.connections.get(key);
+  async getConnection(database: string, profile?: string): Promise<any> {
+    const profileName = profile || await this.profileManager.getActiveProfile();
+    const key = `${database}_${profileName}`;
+    let connection = this.connections.get(key);
     
     if (!connection) {
-      throw new Error(`No connection found for ${database} profile '${profile}'. Available profiles: ${this.getAvailableProfiles(database).join(', ')}`);
+      // Try to dynamically create connection if profile exists
+      await this.reinitializeConnections();
+      connection = this.connections.get(key);
+    }
+
+    if (!connection) {
+      const availableProfiles = await this.getAvailableProfiles(database);
+      throw new Error(`No connection found for ${database} profile '${profileName}'. Available profiles: ${availableProfiles.join(', ')}`);
     }
     
     return connection;
@@ -110,7 +177,7 @@ class ConnectionManager {
   /**
    * List available profiles for a database type
    */
-  getAvailableProfiles(database: string): string[] {
+  async getAvailableProfiles(database: string): Promise<string[]> {
     const profiles = [];
     for (const key of this.connections.keys()) {
       if (key.startsWith(`${database}_`)) {
@@ -123,46 +190,58 @@ class ConnectionManager {
   /**
    * Get all connection profiles for the extension
    */
-  getAllProfiles(): Array<{ name: string; config: any; displayName: string }> {
-    const profiles = new Map<string, any>();
-    
-    ['postgres', 'mysql', 'mongo'].forEach(database => {
-      this.getAvailableProfiles(database).forEach(profile => {
-        const key = `${database}_${profile}`;
-        profiles.set(key, {
-          name: profile,
-          database,
-          displayName: `${database.toUpperCase()} (${profile})`,
-        });
-      });
-    });
+  async getAllProfiles(): Promise<Array<{ 
+    name: string; 
+    database: string;
+    displayName: string;
+    isActive: boolean;
+    source: string;
+  }>> {
+    const profileInfo = await this.profileManager.getProfileInfo();
+    return profileInfo.map(info => ({
+      name: info.name,
+      database: info.databases.join(', '),
+      displayName: `${info.name} (${info.databases.join(', ')})`,
+      isActive: info.isActive,
+      source: info.source
+    }));
+  }
 
-    return Array.from(profiles.entries()).map(([name, config]) => ({ name, config, displayName: config.displayName }));
+  /**
+   * Get profile manager instance
+   */
+  getProfileManager(): ProfileManager {
+    return this.profileManager;
+  }
+
+  /**
+   * Reinitialize connections (useful after profile changes)
+   */
+  async reinitializeConnections(): Promise<void> {
+    this.connections.clear();
+    await this.initializeConnections();
   }
 }
 
 // Initialize connection manager
 const connectionManager = new ConnectionManager();
 
-// Backward compatibility - keep existing connections for default profile (only if they exist)
-let pgDb: any = null, mysqlDb: any = null, mongoDb: any = null;
-try {
-  pgDb = connectionManager.getConnection('postgres', 'default');
-} catch (e) {
-  console.error('No PostgreSQL default profile found');
+// Async initialization wrapper
+async function initializeConnections() {
+  try {
+    // Backward compatibility - try to get existing connections for default profile  
+    const pgDb = await connectionManager.getConnection('postgres', 'default').catch(() => null);
+    const mysqlDb = await connectionManager.getConnection('mysql', 'default').catch(() => null);
+    const mongoDb = await connectionManager.getConnection('mongo', 'default').catch(() => null);
+    
+    console.error(`Default connections: PG=${!!pgDb}, MySQL=${!!mysqlDb}, Mongo=${!!mongoDb}`);
+  } catch (error) {
+    console.error('Error during connection initialization:', error);
+  }
 }
 
-try {
-  mysqlDb = connectionManager.getConnection('mysql', 'default');
-} catch (e) {
-  console.error('No MySQL default profile found');
-}
-
-try {
-  mongoDb = connectionManager.getConnection('mongo', 'default');
-} catch (e) {
-  console.warn('No MongoDB default profile found');
-}
+// Initialize connections (don't await here to avoid blocking the server start)
+initializeConnections();
 
 // Use shared context storage for cross-agent communication
 const sharedStorage = new SharedContextStorage();
@@ -249,22 +328,19 @@ function mapDatabaseTypeToTS(dbType: string): string {
  * Generates a structured preview of what will be generated
  * This function ALWAYS checks the actual database schema first
  */
-async function generateCodePreview(intentAnalysis: any, database: string, framework: string = 'generic') {
+async function generateCodePreview(intentAnalysis: any, database: string, framework: string = 'generic', profile?: string) {
   // ALWAYS fetch the actual database schema first
   let actualSchema;
   try {
     switch (database) {
       case 'postgres':
-        if (!pgDb) throw new Error('No PostgreSQL connection available');
-        actualSchema = await getPostgresSchema();
+        actualSchema = await getPostgresSchema(undefined, false, profile);
         break;
       case 'mysql':
-        if (!mysqlDb) throw new Error('No MySQL connection available');
-        actualSchema = await getMySQLSchema();
+        actualSchema = await getMySQLSchema(undefined, false, profile);
         break;
       case 'mongo':
-        if (!mongoDb) throw new Error('No MongoDB connection available');
-        actualSchema = await getMongoSchema();
+        actualSchema = await getMongoSchema(undefined, false, profile);
         break;
       default:
         throw new Error(`Unsupported database: ${database}`);
@@ -590,6 +666,95 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           additionalProperties: false
         },
       },
+      
+      // PROFILE MANAGEMENT TOOLS (Claude only)
+      {
+        name: "list_profiles",
+        description:
+          "List all available database connection profiles for the current project. Shows project-specific, global, and environment-based profiles.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+      },
+      {
+        name: "get_active_profile",
+        description:
+          "Get the currently active database profile for the current project.",
+        inputSchema: {
+          type: "object", 
+          properties: {},
+          additionalProperties: false
+        },
+      },
+      {
+        name: "switch_profile",
+        description:
+          "Switch to a different database profile for the current project.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            profile_name: {
+              type: "string",
+              description: "Name of the profile to switch to"
+            }
+          },
+          required: ["profile_name"],
+          additionalProperties: false
+        },
+      },
+      {
+        name: "create_profile",
+        description:
+          "Create a new database profile in the current project.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            profile_name: {
+              type: "string",
+              description: "Name for the new profile"
+            },
+            databases: {
+              type: "object",
+              description: "Database connection configurations",
+              properties: {
+                postgres: {
+                  type: "string",
+                  description: "PostgreSQL connection string"
+                },
+                mysql: {
+                  type: "string", 
+                  description: "MySQL connection string or configuration"
+                },
+                mongo: {
+                  type: "string",
+                  description: "MongoDB connection URI"
+                }
+              },
+              additionalProperties: false
+            }
+          },
+          required: ["profile_name", "databases"],
+          additionalProperties: false
+        },
+      },
+      {
+        name: "delete_profile",
+        description:
+          "Delete a database profile from the current project.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            profile_name: {
+              type: "string",
+              description: "Name of the profile to delete"
+            }
+          },
+          required: ["profile_name"],
+          additionalProperties: false
+        },
+      },
     ],
   };
 });
@@ -603,21 +768,18 @@ server.setRequestHandler(
     try {
       switch (name) {
         case "get_database_schema": {
-          const { database, table_name, include_sample_data = false } = args as any;
+          const { database, table_name, include_sample_data = false, profile } = args as any;
           
           let schema;
           switch (database) {
             case 'postgres':
-              if (!pgDb) throw new Error('No PostgreSQL connection available');
-              schema = await getPostgresSchema(table_name, include_sample_data);
+              schema = await getPostgresSchema(table_name, include_sample_data, profile);
               break;
             case 'mysql':
-              if (!mysqlDb) throw new Error('No MySQL connection available');
-              schema = await getMySQLSchema(table_name, include_sample_data);
+              schema = await getMySQLSchema(table_name, include_sample_data, profile);
               break;
             case 'mongo':
-              if (!mongoDb) throw new Error('No MongoDB connection available');
-              schema = await getMongoSchema(table_name, include_sample_data);
+              schema = await getMongoSchema(table_name, include_sample_data, profile);
               break;
             default:
               throw new Error(`Unsupported database: ${database}`);
@@ -632,21 +794,18 @@ server.setRequestHandler(
         }
 
         case "export_schema_for_codegen": {
-          const { database, target_framework = 'generic', include_relationships = true } = args as any;
+          const { database, target_framework = 'generic', include_relationships = true, profile } = args as any;
           
           let schema;
           switch (database) {
             case 'postgres':
-              if (!pgDb) throw new Error('No PostgreSQL connection available');
-              schema = await getPostgresSchema();
+              schema = await getPostgresSchema(undefined, false, profile);
               break;
             case 'mysql':
-              if (!mysqlDb) throw new Error('No MySQL connection available');
-              schema = await getMySQLSchema();
+              schema = await getMySQLSchema(undefined, false, profile);
               break;
             case 'mongo':
-              if (!mongoDb) throw new Error('No MongoDB connection available');
-              schema = await getMongoSchema();
+              schema = await getMongoSchema(undefined, false, profile);
               break;
             default:
               throw new Error(`Unsupported database: ${database}`);
@@ -734,6 +893,99 @@ server.setRequestHandler(
           };
         }
 
+        // PROFILE MANAGEMENT TOOLS
+        case "list_profiles": {
+          const profileManager = connectionManager.getProfileManager();
+          const profileInfo = await profileManager.getProfileInfo();
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                profiles: profileInfo,
+                activeProfile: await profileManager.getActiveProfile(),
+                isValidProject: profileManager.isValidProject()
+              }, null, 2)
+            }],
+          };
+        }
+
+        case "get_active_profile": {
+          const profileManager = connectionManager.getProfileManager();
+          const activeProfile = await profileManager.getActiveProfile();
+          const allProfiles = await profileManager.getAllProfiles();
+          const activeConfig = allProfiles.profiles[activeProfile];
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                activeProfile,
+                configuration: activeConfig || null,
+                availableDatabases: activeConfig ? Object.keys(activeConfig) : []
+              }, null, 2)
+            }],
+          };
+        }
+
+        case "switch_profile": {
+          const { profile_name } = args as any;
+          const profileManager = connectionManager.getProfileManager();
+          
+          await profileManager.setActiveProfile(profile_name);
+          await connectionManager.reinitializeConnections();
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                message: `Successfully switched to profile '${profile_name}'`,
+                activeProfile: profile_name
+              }, null, 2)
+            }],
+          };
+        }
+
+        case "create_profile": {
+          const { profile_name, databases } = args as any;
+          const profileManager = connectionManager.getProfileManager();
+          
+          await profileManager.createProfile(profile_name, databases);
+          await connectionManager.reinitializeConnections();
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                message: `Successfully created profile '${profile_name}'`,
+                profile: {
+                  name: profile_name,
+                  databases: Object.keys(databases),
+                  isActive: true
+                }
+              }, null, 2)
+            }],
+          };
+        }
+
+        case "delete_profile": {
+          const { profile_name } = args as any;
+          const profileManager = connectionManager.getProfileManager();
+          
+          await profileManager.deleteProfile(profile_name);
+          await connectionManager.reinitializeConnections();
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                message: `Successfully deleted profile '${profile_name}'`,
+                activeProfile: await profileManager.getActiveProfile()
+              }, null, 2)
+            }],
+          };
+        }
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -756,10 +1008,8 @@ server.setRequestHandler(
 );
 
 // Helper functions (schema extraction)
-async function getPostgresSchema(tableName?: string, includeSampleData = false) {
-  if (!pgDb) {
-    throw new Error('No PostgreSQL connection available.');
-  }
+async function getPostgresSchema(tableName?: string, includeSampleData = false, profile?: string) {
+  const pgDb = await connectionManager.getConnection('postgres', profile);
   
   const query = tableName
     ? 'SELECT * FROM information_schema.columns WHERE table_name = $1'
@@ -795,10 +1045,8 @@ async function getPostgresSchema(tableName?: string, includeSampleData = false) 
   return schema;
 }
 
-async function getMySQLSchema(tableName?: string, includeSampleData = false) {
-  if (!mysqlDb) {
-    throw new Error('No MySQL connection available.');
-  }
+async function getMySQLSchema(tableName?: string, includeSampleData = false, profile?: string) {
+  const mysqlDb = await connectionManager.getConnection('mysql', profile);
   
   const query = tableName
     ? 'SELECT * FROM information_schema.columns WHERE table_name = ? ORDER BY ordinal_position'
@@ -838,10 +1086,8 @@ async function getMySQLSchema(tableName?: string, includeSampleData = false) {
   return schema;
 }
 
-async function getMongoSchema(collectionName?: string, includeSampleData = false) {
-  if (!mongoDb) {
-    throw new Error('No MongoDB connection available.');
-  }
+async function getMongoSchema(collectionName?: string, includeSampleData = false, profile?: string) {
+  const mongoDb = await connectionManager.getConnection('mongo', profile);
   
   const collections = collectionName ? [collectionName] : await mongoDb.listCollections();
   const schema: any = {};
