@@ -224,55 +224,148 @@ function extractTableNamesFromRequest(request: string): string[] {
 }
 
 /**
- * Generates a structured preview of what will be generated
+ * Helper function to map database types to TypeScript types
  */
-function generateCodePreview(intentAnalysis: any, database: string, framework: string = 'generic') {
+function mapDatabaseTypeToTS(dbType: string): string {
+  const type = dbType.toLowerCase();
+  
+  if (type.includes('int') || type.includes('number') || type.includes('decimal') || type.includes('float')) {
+    return 'number';
+  }
+  if (type.includes('bool')) {
+    return 'boolean';
+  }
+  if (type.includes('date') || type.includes('time')) {
+    return 'Date';
+  }
+  if (type.includes('json') || type.includes('object')) {
+    return 'any';
+  }
+  
+  return 'string'; // Default to string for text, varchar, etc.
+}
+
+/**
+ * Generates a structured preview of what will be generated
+ * This function ALWAYS checks the actual database schema first
+ */
+async function generateCodePreview(intentAnalysis: any, database: string, framework: string = 'generic') {
+  // ALWAYS fetch the actual database schema first
+  let actualSchema;
+  try {
+    switch (database) {
+      case 'postgres':
+        if (!pgDb) throw new Error('No PostgreSQL connection available');
+        actualSchema = await getPostgresSchema();
+        break;
+      case 'mysql':
+        if (!mysqlDb) throw new Error('No MySQL connection available');
+        actualSchema = await getMySQLSchema();
+        break;
+      case 'mongo':
+        if (!mongoDb) throw new Error('No MongoDB connection available');
+        actualSchema = await getMongoSchema();
+        break;
+      default:
+        throw new Error(`Unsupported database: ${database}`);
+    }
+  } catch (error) {
+    throw new Error(`Failed to fetch database schema: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+
+  // Extract actual table/collection names from schema
+  const actualTables = Object.keys(actualSchema);
+  
+  // Match intent with actual tables (find tables that exist in the database)
+  const matchedTables = intentAnalysis.detectedTables.filter((intentTable: string) => {
+    return actualTables.some((actualTable: string) => 
+      actualTable.toLowerCase().includes(intentTable.toLowerCase()) ||
+      intentTable.toLowerCase().includes(actualTable.toLowerCase())
+    );
+  });
+
+  // If no matches found, use all actual tables (but limit to reasonable number)
+  const tablesToUse: string[] = matchedTables.length > 0 ? matchedTables : actualTables.slice(0, 5);
+
   const preview = {
     intent: intentAnalysis,
+    actualSchema: actualSchema,  // Include actual schema in preview
+    matchedTables,               // Show which tables matched the intent
     framework,
     database,
     fileStructure: [] as string[],
     codeSnippets: {} as Record<string, string>,
     suggestions: {
       endpoints: [] as string[],
-      models: [] as string[],
+      models: tablesToUse,
       middleware: [] as string[]
+    },
+    schemaValidation: {
+      tablesFound: actualTables.length,
+      tablesMatched: matchedTables.length,
+      tablesUsed: tablesToUse.length,
+      warnings: [] as string[]
     }
   };
 
-  // Generate file structure based on framework
+  // Add warnings if no tables matched
+  if (matchedTables.length === 0) {
+    preview.schemaValidation.warnings.push(
+      `No tables found matching intent "${intentAnalysis.originalRequest}". Using first ${tablesToUse.length} tables from schema.`
+    );
+  }
+
+  // Generate file structure based on framework and actual tables
   if (framework === 'nextjs') {
     preview.fileStructure = [
       'pages/api/auth/[...nextauth].ts',
-      'pages/api/users/index.ts',
-      'pages/api/users/[id].ts',
+      ...tablesToUse.map(table => `pages/api/${table}/index.ts`),
+      ...tablesToUse.map(table => `pages/api/${table}/[id].ts`),
       'lib/db.ts',
-      'types/user.ts',
+      ...tablesToUse.map(table => `types/${table}.ts`),
       'middleware/auth.ts'
     ];
   } else if (framework === 'express') {
     preview.fileStructure = [
-      'routes/users.js',
+      ...tablesToUse.map(table => `routes/${table}.js`),
       'routes/auth.js',
-      'models/User.js',
+      ...tablesToUse.map(table => `models/${table.charAt(0).toUpperCase() + table.slice(1)}.js`),
       'middleware/auth.js',
       'config/database.js'
     ];
   } else {
     preview.fileStructure = [
-      'api/users.ts',
-      'models/user.ts',
+      ...tablesToUse.map(table => `api/${table}.ts`),
+      ...tablesToUse.map(table => `models/${table}.ts`),
       'auth/middleware.ts',
       'database/connection.ts'
     ];
   }
 
-  // Generate endpoint suggestions
-  for (const table of intentAnalysis.detectedTables) {
+  // Generate endpoint suggestions based on actual tables
+  for (const table of tablesToUse) {
     preview.suggestions.endpoints.push(`GET /api/${table}`);
     preview.suggestions.endpoints.push(`POST /api/${table}`);
     preview.suggestions.endpoints.push(`PUT /api/${table}/:id`);
     preview.suggestions.endpoints.push(`DELETE /api/${table}/:id`);
+  }
+
+  // Generate basic code snippets based on actual schema
+  if (actualSchema && tablesToUse.length > 0) {
+    const firstTable = tablesToUse[0];
+    if (firstTable && actualSchema[firstTable]) {
+      const tableSchema = actualSchema[firstTable];
+      
+      if (tableSchema && tableSchema.columns) {
+        // Generate TypeScript interface based on actual columns
+        const columns = tableSchema.columns;
+        const interfaceProps = columns.map((col: any) => 
+          `  ${col.name}: ${mapDatabaseTypeToTS(col.type)}${col.nullable ? ' | null' : ''};`
+        ).join('\n');
+        
+        preview.codeSnippets[`types/${firstTable}.ts`] = `export interface ${firstTable.charAt(0).toUpperCase() + firstTable.slice(1)} {\n${interfaceProps}\n}`;
+      }
+    }
   }
 
   return preview;
@@ -583,7 +676,7 @@ server.setRequestHandler(
 
         case "generate_preview": {
           const { intent_analysis, database, framework = 'generic', include_tests = false } = args as any;
-          const preview = generateCodePreview(intent_analysis, database, framework);
+          const preview = await generateCodePreview(intent_analysis, database, framework);
           
           return {
             content: [{
