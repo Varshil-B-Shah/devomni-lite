@@ -105,6 +105,12 @@
         "title": "Create New Workflow Context",
         "category": "DevOmni",
         "icon": "$(add)"
+      },
+      {
+        "command": "devomni.setupMCP",
+        "title": "Setup MCP Integration for GitHub Copilot",
+        "category": "DevOmni",
+        "icon": "$(settings-gear)"
       }
     ],
     "menus": {

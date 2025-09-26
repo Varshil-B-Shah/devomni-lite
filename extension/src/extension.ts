@@ -267,6 +267,15 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // MCP Setup Command
+    const setupMCPCommand = vscode.commands.registerCommand('devomni.setupMCP', async () => {
+        try {
+            await setupMCPHandler();
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to setup MCP: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
     // Add to subscriptions
     context.subscriptions.push(
         generateAPIsCommand,
@@ -282,7 +291,8 @@ export function activate(context: vscode.ExtensionContext) {
         listContextsCommand,
         searchContextsCommand,
         getContextCommand,
-        createContextCommand
+        createContextCommand,
+        setupMCPCommand
     );
 
     // Auto-refresh schema on activation if enabled
@@ -490,6 +500,69 @@ async function generateTypesHandler(
     });
 
     vscode.window.showInformationMessage('TypeScript types generated!');
+}
+
+async function setupMCPHandler() {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('Please open a workspace/project folder first');
+        return;
+    }
+
+    try {
+        // Create .vscode directory if it doesn't exist
+        const vscodeDir = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode');
+        await vscode.workspace.fs.createDirectory(vscodeDir);
+
+        // Create MCP configuration
+        const mcpConfig = {
+            "servers": {
+                "devomni": {
+                    "type": "stdio",
+                    "command": "node",
+                    "args": [
+                        "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite\\dist\\mcp-server.js"
+                    ]
+                }
+            }
+        };
+
+        // Write mcp.json file
+        const mcpConfigPath = vscode.Uri.joinPath(vscodeDir, 'mcp.json');
+        await vscode.workspace.fs.writeFile(
+            mcpConfigPath, 
+            Buffer.from(JSON.stringify(mcpConfig, null, 2))
+        );
+
+        // Show success message with instructions
+        const message = [
+            '✅ DevOmni MCP configuration created!',
+            '',
+            '📁 Created: .vscode/mcp.json',
+            '',
+            '🔄 Please restart VS Code to activate MCP integration.',
+            '',
+            '💡 GitHub Copilot can now access DevOmni tools:'
+        ].join('\n');
+
+        const choice = await vscode.window.showInformationMessage(
+            message,
+            { modal: true },
+            'Restart VS Code',
+            'View Config File',
+            'OK'
+        );
+
+        if (choice === 'Restart VS Code') {
+            await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        } else if (choice === 'View Config File') {
+            const doc = await vscode.workspace.openTextDocument(mcpConfigPath);
+            await vscode.window.showTextDocument(doc);
+        }
+
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to setup MCP: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
 }
 
 async function createGeneratedFiles(generatedCode: { [filename: string]: string }) {
