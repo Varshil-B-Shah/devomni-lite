@@ -102,6 +102,11 @@
           "default": "postgres",
           "description": "Default database type to use"
         },
+        "devomni.outputDirectory": {
+          "type": "string",
+          "default": "generated",
+          "description": "Directory where generated files will be placed (relative to workspace root)"
+        },
         "devomni.targetFramework": {
           "type": "string",
           "enum": [

@@ -258,18 +258,8 @@ async function generateTypesHandler(
         
         progress.report({ increment: 80, message: "Creating types file..." });
         
-        // Create types.ts file
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            throw new Error('No workspace folder open');
-        }
-
-        const typesPath = vscode.Uri.joinPath(workspaceFolder.uri, 'types', 'database.ts');
-        await vscode.workspace.fs.writeFile(typesPath, Buffer.from(typesCode));
-        
-        // Open the generated file
-        const doc = await vscode.workspace.openTextDocument(typesPath);
-        await vscode.window.showTextDocument(doc);
+        // Use safe file creation with overwrite protection
+        await createGeneratedFiles({ 'types/database.ts': typesCode });
         
         progress.report({ increment: 100, message: "Complete!" });
     });
@@ -283,22 +273,66 @@ async function createGeneratedFiles(generatedCode: { [filename: string]: string 
         throw new Error('No workspace folder open');
     }
 
+    // Safety: Generate files into a dedicated directory
+    const config = vscode.workspace.getConfiguration('devomni');
+    const outputDir = config.get<string>('outputDirectory') || 'generated';
+    
     let firstFile: vscode.Uri | null = null;
+    const existingFiles: string[] = [];
+    const filesToCreate: Array<{ path: vscode.Uri, content: string, relativePath: string }> = [];
 
+    // Check for existing files first
     for (const [filename, content] of Object.entries(generatedCode)) {
-        const filePath = vscode.Uri.joinPath(workspaceFolder.uri, filename);
+        const safeFilename = `${outputDir}/${filename}`;
+        const filePath = vscode.Uri.joinPath(workspaceFolder.uri, safeFilename);
         
-        // Create directory if it doesn't exist
-        const directory = vscode.Uri.joinPath(filePath, '..');
-        await vscode.workspace.fs.createDirectory(directory);
+        try {
+            await vscode.workspace.fs.stat(filePath);
+            existingFiles.push(safeFilename);
+        } catch {
+            // File doesn't exist, safe to create
+        }
         
-        // Write file
-        await vscode.workspace.fs.writeFile(filePath, Buffer.from(content));
-        
-        if (!firstFile) {
-            firstFile = filePath;
+        filesToCreate.push({
+            path: filePath,
+            content,
+            relativePath: safeFilename
+        });
+    }
+
+    // If files exist, prompt user for confirmation
+    if (existingFiles.length > 0) {
+        const choice = await vscode.window.showWarningMessage(
+            `${existingFiles.length} file(s) already exist and will be overwritten:\n${existingFiles.join('\n')}`,
+            { modal: true },
+            'Overwrite All',
+            'Cancel'
+        );
+
+        if (choice !== 'Overwrite All') {
+            vscode.window.showInformationMessage('Code generation cancelled to prevent file overwrites.');
+            return;
         }
     }
+
+    // Create all files
+    for (const fileInfo of filesToCreate) {
+        // Create directory if it doesn't exist
+        const directory = vscode.Uri.joinPath(fileInfo.path, '..');
+        await vscode.workspace.fs.createDirectory(directory);
+        
+        // Write file safely
+        await vscode.workspace.fs.writeFile(fileInfo.path, Buffer.from(fileInfo.content));
+        
+        if (!firstFile) {
+            firstFile = fileInfo.path;
+        }
+    }
+
+    // Show success message with output location
+    vscode.window.showInformationMessage(
+        `Generated ${filesToCreate.length} file(s) in /${outputDir}/ directory`
+    );
 
     // Open the first generated file
     if (firstFile) {
