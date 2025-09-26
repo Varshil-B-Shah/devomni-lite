@@ -30,6 +30,7 @@ import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import { PostgresAdapter } from "./postgresAdapter.js";
 import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
+import { SharedContextStorage } from "./sharedContextStorage.js";
 import { 
   UnifiedQuerySchema, 
   CompareDatabasesSchema,
@@ -228,12 +229,12 @@ const pgDb = connectionManager.getConnection('postgres', 'default');
 const mysqlDb = connectionManager.getConnection('mysql', 'default');
 const mongoDb = connectionManager.getConnection('mongo', 'default');
 
-// ==========================================
-// PREVIEW-BASED WORKFLOW HELPER FUNCTIONS
+//==========================================
+// PREVIEW-BASED WORKFLOW HELPER FUNCTIONS  
 // ==========================================
 
-// In-memory context storage for cross-agent communication
-const workflowContexts = new Map<string, any>();
+// Use shared context storage for cross-agent communication
+const sharedStorage = new SharedContextStorage();
 
 /**
  * Analyzes user's natural language intent for API generation
@@ -421,28 +422,7 @@ export interface ${capitalize(sampleTable)} {
  * Creates a workflow context for cross-agent communication
  */
 function createWorkflowContext(contextName: string, intentAnalysis: any, previewData?: any, expiresInMinutes: number = 60) {
-  const context = {
-    id: contextName,
-    created: new Date().toISOString(),
-    expires: new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString(),
-    intentAnalysis,
-    previewData,
-    status: 'ready',
-    instructions: {
-      forCopilot: `Use this context to generate APIs based on the analyzed intent. The database is ${intentAnalysis.database} with framework ${intentAnalysis.framework}.`,
-      forClaude: `Context created for API generation. Share this with GitHub Copilot using: "Using context ${contextName}, generate the APIs"`,
-    }
-  };
-
-  // Store in memory (in production, use Redis or database)
-  workflowContexts.set(contextName, context);
-
-  // Clean up expired contexts
-  setTimeout(() => {
-    workflowContexts.delete(contextName);
-  }, expiresInMinutes * 60 * 1000);
-
-  return context;
+  return sharedStorage.createContext(contextName, intentAnalysis, previewData, expiresInMinutes);
 }
 
 /**
@@ -456,68 +436,21 @@ function capitalize(str: string): string {
  * List all workflow contexts with optional filtering
  */
 function listWorkflowContexts(includeExpired: boolean = false) {
-  const now = new Date();
-  const contexts = Array.from(workflowContexts.entries()).map(([name, context]) => ({
-    name,
-    ...context,
-    isExpired: new Date(context.expires) < now
-  }));
-
-  if (!includeExpired) {
-    return contexts.filter(c => !c.isExpired);
-  }
-
-  return contexts;
+  return sharedStorage.listContexts(includeExpired);
 }
 
 /**
  * Search workflow contexts by criteria
  */
 function searchWorkflowContexts(keywords?: string[], database?: string, framework?: string) {
-  const contexts = listWorkflowContexts(false); // Only active contexts
-  
-  return contexts.filter(context => {
-    // Filter by database
-    if (database && context.intentAnalysis?.database !== database) {
-      return false;
-    }
-
-    // Filter by framework
-    if (framework && context.intentAnalysis?.framework !== framework) {
-      return false;
-    }
-
-    // Filter by keywords
-    if (keywords && keywords.length > 0) {
-      const searchText = `${context.name} ${context.intentAnalysis?.originalRequest || ''}`.toLowerCase();
-      return keywords.some(keyword => searchText.includes(keyword.toLowerCase()));
-    }
-
-    return true;
-  });
+  return sharedStorage.searchContexts(keywords, database, framework);
 }
 
 /**
  * Get a specific workflow context by name
  */
 function getWorkflowContext(contextName: string) {
-  const context = workflowContexts.get(contextName);
-  
-  if (!context) {
-    throw new Error(`Context '${contextName}' not found`);
-  }
-
-  // Check if expired
-  if (new Date(context.expires) < new Date()) {
-    workflowContexts.delete(contextName);
-    throw new Error(`Context '${contextName}' has expired`);
-  }
-
-  return {
-    name: contextName,
-    ...context,
-    isExpired: false
-  };
+  return sharedStorage.getContext(contextName);
 }
 
 // Schema extraction functions

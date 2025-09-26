@@ -8,6 +8,7 @@ import cors from "cors";
 import { PostgresAdapter } from "./postgresAdapter.js";
 import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
+import { SharedContextStorage } from "./sharedContextStorage.js";
 import { 
   validateInput,
   UnifiedQuerySchema, 
@@ -39,8 +40,8 @@ const mongoDb = new MongoAdapter(
   process.env.MONGODB_DATABASE!
 );
 
-// Context management storage (shared with MCP server)
-const workflowContexts = new Map<string, any>();
+// Use shared context storage (same as MCP server)
+const sharedStorage = new SharedContextStorage();
 
 // Context management functions (copied from mcp-server.ts)
 function analyzeUserIntent(userRequest: string, database: string, framework: string) {
@@ -74,58 +75,15 @@ function extractFeaturesFromRequest(request: string): string[] {
 }
 
 function createWorkflowContext(contextName: string, intentAnalysis: any, previewData?: any, expiresInMinutes: number = 60) {
-  const context = {
-    contextName,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString(),
-    intentAnalysis,
-    previewData,
-    status: 'ready'
-  };
-
-  workflowContexts.set(contextName, context);
-
-  // Auto-cleanup expired contexts
-  setTimeout(() => {
-    workflowContexts.delete(contextName);
-  }, expiresInMinutes * 60 * 1000);
-
-  return context;
+  return sharedStorage.createContext(contextName, intentAnalysis, previewData, expiresInMinutes);
 }
 
 function listWorkflowContexts(includeExpired: boolean = false) {
-  const now = new Date();
-  const contexts = Array.from(workflowContexts.entries()).map(([name, context]) => ({
-    contextName: name,
-    ...context,
-    isExpired: new Date(context.expiresAt) < now
-  }));
-
-  if (!includeExpired) {
-    return contexts.filter(c => !c.isExpired);
-  }
-
-  return contexts;
+  return sharedStorage.listContexts(includeExpired);
 }
 
 function getWorkflowContext(contextName: string) {
-  const context = workflowContexts.get(contextName);
-  
-  if (!context) {
-    throw new Error(`Context '${contextName}' not found`);
-  }
-
-  // Check if expired
-  if (new Date(context.expiresAt) < new Date()) {
-    workflowContexts.delete(contextName);
-    throw new Error(`Context '${contextName}' has expired`);
-  }
-
-  return {
-    contextName,
-    ...context,
-    isExpired: false
-  };
+  return sharedStorage.getContext(contextName);
 }
 
 // Health check endpoint
