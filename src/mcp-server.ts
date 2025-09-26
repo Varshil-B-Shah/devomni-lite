@@ -224,10 +224,25 @@ class ConnectionManager {
 // Initialize connection manager
 const connectionManager = new ConnectionManager();
 
-// Backward compatibility - keep existing connections for default profile
-const pgDb = connectionManager.getConnection('postgres', 'default');
-const mysqlDb = connectionManager.getConnection('mysql', 'default');
-const mongoDb = connectionManager.getConnection('mongo', 'default');
+// Backward compatibility - keep existing connections for default profile (only if they exist)
+let pgDb: any = null, mysqlDb: any = null, mongoDb: any = null;
+try {
+  pgDb = connectionManager.getConnection('postgres', 'default');
+} catch (e) {
+  console.warn('No PostgreSQL default profile found');
+}
+
+try {
+  mysqlDb = connectionManager.getConnection('mysql', 'default');
+} catch (e) {
+  console.warn('No MySQL default profile found');
+}
+
+try {
+  mongoDb = connectionManager.getConnection('mongo', 'default');
+} catch (e) {
+  console.warn('No MongoDB default profile found');
+}
 
 //==========================================
 // PREVIEW-BASED WORKFLOW HELPER FUNCTIONS  
@@ -502,11 +517,17 @@ async function getPostgresSchema(tableName?: string, includeSampleData = false) 
       `;
     }
 
+    if (!pgDb) {
+      throw new Error('No PostgreSQL connection available. Please configure database connection first.');
+    }
     const result = await pgDb.query(query, params);
     const schema = organizeSchemaData(result.rows, 'postgres');
     
     if (includeSampleData && tableName) {
       const sampleQuery = `SELECT * FROM ${tableName} LIMIT 3`;
+      if (!pgDb) {
+        throw new Error('No PostgreSQL connection available.');
+      }
       const sampleResult = await pgDb.query(sampleQuery);
       schema[tableName] = { ...schema[tableName], sampleData: sampleResult.rows };
     }
