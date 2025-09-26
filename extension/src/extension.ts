@@ -141,9 +141,10 @@ export function activate(context: vscode.ExtensionContext) {
     const listContextsCommand = vscode.commands.registerCommand('devomni.listContexts', async () => {
         try {
             const result = await mcpClient.callTool('list_contexts', {});
-            const contexts = JSON.parse(result.content[0].text);
+            const response = JSON.parse(result.content[0].text);
+            const contexts = response.contexts || response; // Handle both formats
             
-            if (contexts.length === 0) {
+            if (!contexts || contexts.length === 0) {
                 vscode.window.showInformationMessage('No workflow contexts found. Create some in Claude Desktop first!');
                 return;
             }
@@ -178,9 +179,10 @@ export function activate(context: vscode.ExtensionContext) {
             const result = await mcpClient.callTool('search_contexts', {
                 keywords: [keyword]
             });
-            const contexts = JSON.parse(result.content[0].text);
+            const response = JSON.parse(result.content[0].text);
+            const contexts = response.contexts || response; // Handle both formats
             
-            if (contexts.length === 0) {
+            if (!contexts || contexts.length === 0) {
                 vscode.window.showInformationMessage(`No contexts found matching "${keyword}"`);
                 return;
             }
