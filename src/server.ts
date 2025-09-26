@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import os from 'os';
 
 // Load environment variables silently (no debug output)
 dotenv.config({ debug: false });
@@ -9,6 +10,7 @@ import { PostgresAdapter } from "./postgresAdapter.js";
 import { MySQLAdapter } from "./mysqlAdapter.js";
 import { MongoAdapter } from "./mongoAdapter.js";
 import { SharedContextStorage } from "./sharedContextStorage.js";
+import { ProfileManager } from "./profileManager.js";
 import { 
   validateInput,
   UnifiedQuerySchema, 
@@ -39,6 +41,16 @@ const mongoDb = new MongoAdapter(
   process.env.MONGODB_URI!,
   process.env.MONGODB_DATABASE!
 );
+
+// Initialize profile manager
+const profileManager = new ProfileManager();
+
+// Debug: Log profile manager paths
+console.log('🔍 Profile Manager Debug Info:');
+console.log('  Project Root:', process.cwd());
+console.log('  Project Profiles Path:', `${process.cwd()}\\.devomni\\profiles.json`);
+console.log('  Active Profile Path:', `${process.cwd()}\\.devomni\\active-profile.txt`);
+console.log('  Global Profiles Path:', `${os.homedir()}\\.devomni\\global-profiles.json`);
 
 // Use shared context storage (same as MCP server)
 const sharedStorage = new SharedContextStorage();
@@ -207,6 +219,88 @@ app.post("/mcp-tool", async (req, res) => {
         
         const context = getWorkflowContext(context_name);
         result = { content: [{ type: "text", text: JSON.stringify(context, null, 2) }] };
+        break;
+      }
+
+      case "list_profiles": {
+        const profileInfo = await profileManager.getProfileInfo();
+        const activeProfile = await profileManager.getActiveProfile();
+        const allProfiles = await profileManager.getAllProfiles();
+        
+        // Debug logging
+        console.log('🔍 List Profiles Debug:');
+        console.log('  Found profiles:', profileInfo.map(p => p.name));
+        console.log('  Active profile:', activeProfile);
+        console.log('  Raw profile config:', JSON.stringify(allProfiles, null, 2));
+        
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify({ 
+            profiles: profileInfo, 
+            activeProfile,
+            isValidProject: profileManager.isValidProject()
+          }, null, 2) 
+        }] };
+        break;
+      }
+
+      case "get_active_profile": {
+        const activeProfile = await profileManager.getActiveProfile();
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify({ activeProfile }, null, 2) 
+        }] };
+        break;
+      }
+
+      case "switch_profile": {
+        // Accept both profileName and profile_name for compatibility
+        const profileName = (args as any).profileName || (args as any).profile_name;
+        if (!profileName) {
+          throw new Error("Profile name is required");
+        }
+        await profileManager.setActiveProfile(profileName);
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify({ success: true, activeProfile: profileName }, null, 2) 
+        }] };
+        break;
+      }
+
+      case "create_profile": {
+        const { profileName, config } = args as { profileName: string; config: any };
+        if (!profileName) {
+          throw new Error("Profile name is required");
+        }
+        
+        // Allow empty config - databases are optional
+        const databaseConfig = config || {};
+        
+        // Ensure config matches DatabaseProfile interface
+        const validatedConfig = {
+          postgres: databaseConfig.postgres || undefined,
+          mysql: databaseConfig.mysql || undefined,
+          mongo: databaseConfig.mongo || undefined
+        };
+        
+        await profileManager.createProfile(profileName, validatedConfig);
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify({ success: true, profileName, config: validatedConfig }, null, 2) 
+        }] };
+        break;
+      }
+
+      case "delete_profile": {
+        const { profileName } = args as { profileName: string };
+        if (!profileName) {
+          throw new Error("Profile name is required");
+        }
+        await profileManager.deleteProfile(profileName);
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify({ success: true, deletedProfile: profileName }, null, 2) 
+        }] };
         break;
       }
       

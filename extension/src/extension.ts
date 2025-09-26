@@ -276,6 +276,217 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Enhanced Profile Management Commands
+    const listProfilesCommand = vscode.commands.registerCommand('devomni.listProfiles', async () => {
+        try {
+            const result = await mcpClient.callTool('list_profiles', {});
+            const response = JSON.parse(result.content[0].text);
+            
+            if (!response.profiles || response.profiles.length === 0) {
+                vscode.window.showInformationMessage('No database profiles found. Create one using the "Create Profile" command!');
+                return;
+            }
+
+            interface ProfileItem extends vscode.QuickPickItem {
+                profileData: any;
+            }
+
+            const items: ProfileItem[] = response.profiles.map((profile: any) => ({
+                label: `$(${profile.isActive ? 'check' : 'circle-outline'}) ${profile.name}`,
+                description: `${profile.databases.join(', ')} • ${profile.source}`,
+                detail: profile.isActive ? 'Currently Active' : 'Available',
+                profileData: profile
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Database Connection Profiles',
+                title: 'DevOmni - Profile Manager'
+            });
+
+            if (selected && !selected.profileData.isActive) {
+                const switch_choice = await vscode.window.showInformationMessage(
+                    `Switch to profile "${selected.profileData.name}"?`,
+                    'Switch', 'Cancel'
+                );
+
+                if (switch_choice === 'Switch') {
+                    await mcpClient.callTool('switch_profile', { profile_name: selected.profileData.name });
+                    vscode.window.showInformationMessage(`✅ Switched to profile: ${selected.profileData.name}`);
+                }
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to list profiles: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const switchProfileCommand = vscode.commands.registerCommand('devomni.switchProfile', async () => {
+        try {
+            const result = await mcpClient.callTool('list_profiles', {});
+            const response = JSON.parse(result.content[0].text);
+            
+            if (!response.profiles || response.profiles.length === 0) {
+                vscode.window.showInformationMessage('No profiles available to switch to.');
+                return;
+            }
+
+            interface SwitchProfileItem extends vscode.QuickPickItem {
+                profileName: string;
+            }
+
+            const items: SwitchProfileItem[] = response.profiles
+                .filter((profile: any) => !profile.isActive)
+                .map((profile: any) => ({
+                    label: `$(database) ${profile.name}`,
+                    description: profile.databases.join(', '),
+                    detail: `Source: ${profile.source}`,
+                    profileName: profile.name
+                }));
+
+            if (items.length === 0) {
+                vscode.window.showInformationMessage('All available profiles are already active.');
+                return;
+            }
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select profile to switch to',
+                title: 'DevOmni - Switch Profile'
+            });
+
+            if (selected) {
+                await mcpClient.callTool('switch_profile', { profile_name: selected.profileName });
+                vscode.window.showInformationMessage(`✅ Switched to profile: ${selected.profileName}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to switch profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const createProfileCommand = vscode.commands.registerCommand('devomni.createProfile', async () => {
+        try {
+            const profileName = await vscode.window.showInputBox({
+                prompt: 'Enter a name for the new profile',
+                placeHolder: 'e.g., dev, staging, prod, client-a',
+                validateInput: (value) => {
+                    if (!value?.trim()) return 'Profile name cannot be empty';
+                    if (!/^[a-zA-Z0-9_-]+$/.test(value)) return 'Profile name can only contain letters, numbers, dashes, and underscores';
+                    return undefined;
+                }
+            });
+
+            if (!profileName) return;
+
+            const databases: any = {};
+
+            // PostgreSQL
+            const postgres = await vscode.window.showInputBox({
+                prompt: 'PostgreSQL connection string (optional)',
+                placeHolder: 'postgresql://username:password@host:port/database'
+            });
+            if (postgres?.trim()) databases.postgres = postgres.trim();
+
+            // MySQL
+            const mysql = await vscode.window.showInputBox({
+                prompt: 'MySQL connection string (optional)',
+                placeHolder: 'mysql://username:password@host:port/database'
+            });
+            if (mysql?.trim()) databases.mysql = mysql.trim();
+
+            // MongoDB
+            const mongo = await vscode.window.showInputBox({
+                prompt: 'MongoDB connection URI (optional)',
+                placeHolder: 'mongodb://username:password@host:port/database'
+            });
+            if (mongo?.trim()) databases.mongo = mongo.trim();
+
+            // Make databases optional - empty config is allowed
+            const config = {
+                postgres: databases.postgres || null,
+                mysql: databases.mysql || null,
+                mongo: databases.mongo || null
+            };
+
+            await mcpClient.callTool('create_profile', {
+                profileName: profileName,
+                config: config
+            });
+
+            const dbCount = Object.values(databases).filter(Boolean).length;
+            const message = dbCount > 0 
+                ? `✅ Created profile: ${profileName} with ${dbCount} database connection(s)`
+                : `✅ Created empty profile: ${profileName} (you can add database connections later)`;
+            
+            vscode.window.showInformationMessage(message);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to create profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const deleteProfileCommand = vscode.commands.registerCommand('devomni.deleteProfile', async () => {
+        try {
+            const result = await mcpClient.callTool('list_profiles', {});
+            const response = JSON.parse(result.content[0].text);
+            
+            if (!response.profiles || response.profiles.length === 0) {
+                vscode.window.showInformationMessage('No profiles available to delete.');
+                return;
+            }
+
+            interface DeleteProfileItem extends vscode.QuickPickItem {
+                profileName: string;
+            }
+
+            const items: DeleteProfileItem[] = response.profiles
+                .filter((profile: any) => profile.name !== 'default' && profile.source === 'project')
+                .map((profile: any) => ({
+                    label: `$(trash) ${profile.name}`,
+                    description: profile.databases.join(', '),
+                    detail: profile.isActive ? 'Currently Active' : 'Available',
+                    profileName: profile.name
+                }));
+
+            if (items.length === 0) {
+                vscode.window.showInformationMessage('No project profiles available for deletion. Only project-specific profiles can be deleted.');
+                return;
+            }
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select profile to delete',
+                title: 'DevOmni - Delete Profile'
+            });
+
+            if (selected) {
+                const confirmation = await vscode.window.showWarningMessage(
+                    `Are you sure you want to delete profile "${selected.profileName}"? This action cannot be undone.`,
+                    { modal: true },
+                    'Delete',
+                    'Cancel'
+                );
+
+                if (confirmation === 'Delete') {
+                    await mcpClient.callTool('delete_profile', { profile_name: selected.profileName });
+                    vscode.window.showInformationMessage(`✅ Deleted profile: ${selected.profileName}`);
+                }
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to delete profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const showActiveProfileCommand = vscode.commands.registerCommand('devomni.showActiveProfile', async () => {
+        try {
+            const result = await mcpClient.callTool('get_active_profile', {});
+            const response = JSON.parse(result.content[0].text);
+
+            const message = `🔗 Active Profile: ${response.activeProfile}\n\nDatabases:\n${Object.entries(response.activeConfig || {})
+                .map(([db, conn]) => `• ${db.toUpperCase()}: ${conn}`)
+                .join('\n')}`;
+
+            vscode.window.showInformationMessage(message);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to show active profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
     // Add to subscriptions
     context.subscriptions.push(
         generateAPIsCommand,
@@ -292,7 +503,12 @@ export function activate(context: vscode.ExtensionContext) {
         searchContextsCommand,
         getContextCommand,
         createContextCommand,
-        setupMCPCommand
+        setupMCPCommand,
+        listProfilesCommand,
+        switchProfileCommand,
+        createProfileCommand,
+        deleteProfileCommand,
+        showActiveProfileCommand
     );
 
     // Auto-refresh schema on activation if enabled
