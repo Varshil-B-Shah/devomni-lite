@@ -1,7 +1,23 @@
 import dotenv from 'dotenv';
 
-// Load environment variables
+// Completely suppress all output during dotenv loading
+const originalWrite = process.stdout.write;
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+
+process.stdout.write = () => true;
+console.log = () => {};
+console.error = () => {};
+console.warn = () => {};
+
 dotenv.config();
+
+// Restore output functions
+process.stdout.write = originalWrite;
+console.log = originalLog;
+console.error = originalError;
+console.warn = originalWarn;
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -798,7 +814,7 @@ server.setRequestHandler(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Devomni Unified MCP server running");
+  // Removed console message to prevent JSON contamination in Claude Desktop
 }
 
 main().catch((error) => {

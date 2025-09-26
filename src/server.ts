@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables silently (no debug output)
+dotenv.config({ debug: false });
 
 import express from "express";
 import cors from "cors";
