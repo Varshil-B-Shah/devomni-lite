@@ -36,6 +36,12 @@ import {
   GetDatabaseSchemaSchema,
   ListDatabaseTablesSchema,
   ExportSchemaForCodegenSchema,
+  AnalyzeIntentSchema,
+  GeneratePreviewSchema,
+  CreateWorkflowContextSchema,
+  ListContextsSchema,
+  SearchContextsSchema,
+  GetContextSchema,
   validateInput,
   logSecurityEvent 
 } from "./inputValidator.js";
@@ -221,6 +227,298 @@ const connectionManager = new ConnectionManager();
 const pgDb = connectionManager.getConnection('postgres', 'default');
 const mysqlDb = connectionManager.getConnection('mysql', 'default');
 const mongoDb = connectionManager.getConnection('mongo', 'default');
+
+// ==========================================
+// PREVIEW-BASED WORKFLOW HELPER FUNCTIONS
+// ==========================================
+
+// In-memory context storage for cross-agent communication
+const workflowContexts = new Map<string, any>();
+
+/**
+ * Analyzes user's natural language intent for API generation
+ */
+function analyzeUserIntent(userRequest: string, database: string, framework: string) {
+  const analysis = {
+    originalRequest: userRequest,
+    database,
+    framework,
+    detectedTables: [] as string[],
+    suggestedEndpoints: [] as string[],
+    features: [] as string[],
+    complexity: 'medium' as 'simple' | 'medium' | 'complex'
+  };
+
+  // Simple intent analysis (in production, this could use more sophisticated NLP)
+  const request = userRequest.toLowerCase();
+
+  // Detect common patterns
+  if (request.includes('user') && request.includes('management')) {
+    analysis.detectedTables = ['users', 'user_roles', 'permissions'];
+    analysis.suggestedEndpoints = ['auth', 'profile', 'admin'];
+    analysis.features = ['authentication', 'authorization', 'profile-management'];
+  } else if (request.includes('crud') || request.includes('api')) {
+    analysis.detectedTables = extractTableNamesFromRequest(request);
+    analysis.suggestedEndpoints = ['create', 'read', 'update', 'delete'];
+    analysis.features = ['crud-operations', 'validation'];
+  } else if (request.includes('ecommerce') || request.includes('shop')) {
+    analysis.detectedTables = ['products', 'orders', 'customers', 'categories'];
+    analysis.suggestedEndpoints = ['catalog', 'cart', 'checkout', 'orders'];
+    analysis.features = ['product-catalog', 'order-management', 'cart'];
+    analysis.complexity = 'complex';
+  }
+
+  // Detect authentication requirements
+  if (request.includes('auth') || request.includes('login') || request.includes('jwt')) {
+    analysis.features.push('authentication', 'jwt-tokens');
+  }
+
+  // Detect additional features
+  if (request.includes('test') || request.includes('testing')) {
+    analysis.features.push('unit-tests');
+  }
+
+  if (request.includes('validation') || request.includes('validate')) {
+    analysis.features.push('input-validation');
+  }
+
+  return analysis;
+}
+
+/**
+ * Extracts potential table names from user request
+ */
+function extractTableNamesFromRequest(request: string): string[] {
+  const commonTableNames = ['users', 'products', 'orders', 'customers', 'categories', 'posts', 'comments', 'tags'];
+  return commonTableNames.filter(table => 
+    request.includes(table) || request.includes(table.slice(0, -1)) // singular form
+  );
+}
+
+/**
+ * Generates a preview of what will be created
+ */
+async function generateCodePreview(intentAnalysis: any, database: string, framework: string, includeTests: boolean) {
+  const preview = {
+    analysis: intentAnalysis,
+    fileStructure: [] as any[],
+    codeSnippets: {} as any,
+    estimatedFiles: 0,
+    nextSteps: [] as string[]
+  };
+
+  // Get actual database schema for detected tables
+  let actualTables = [];
+  try {
+    for (const tableName of intentAnalysis.detectedTables) {
+      try {
+        let schema;
+        if (database === 'postgres') {
+          schema = await getPostgresSchema(tableName, false);
+        } else if (database === 'mysql') {
+          schema = await getMySQLSchema(tableName, false);
+        } else if (database === 'mongo') {
+          schema = await getMongoSchema(tableName, false);
+        }
+        if (schema && Object.keys(schema.tables).length > 0) {
+          actualTables.push(tableName);
+        }
+      } catch (error) {
+        // Table doesn't exist, skip it
+        continue;
+      }
+    }
+  } catch (error) {
+    // Fallback to detected tables if schema retrieval fails
+    actualTables = intentAnalysis.detectedTables;
+  }
+
+  // Generate file structure based on framework
+  if (framework === 'nextjs') {
+    actualTables.forEach((table: string) => {
+      preview.fileStructure.push({
+        path: `app/api/${table}/route.ts`,
+        description: `CRUD operations for ${table}`,
+        size: 'large'
+      });
+      preview.fileStructure.push({
+        path: `app/api/${table}/[id]/route.ts`,
+        description: `Individual ${table} operations`,
+        size: 'medium'
+      });
+    });
+
+    preview.fileStructure.push({
+      path: 'types/database.ts',
+      description: 'TypeScript type definitions',
+      size: 'medium'
+    });
+
+    preview.fileStructure.push({
+      path: 'lib/database.ts',
+      description: 'Database connection utility',
+      size: 'small'
+    });
+
+    if (includeTests) {
+      actualTables.forEach((table: string) => {
+        preview.fileStructure.push({
+          path: `__tests__/api/${table}.test.ts`,
+          description: `API tests for ${table}`,
+          size: 'medium'
+        });
+      });
+    }
+  }
+
+  preview.estimatedFiles = preview.fileStructure.length;
+
+  // Generate sample code snippets
+  if (actualTables.length > 0) {
+    const sampleTable = actualTables[0];
+    if (framework === 'nextjs') {
+      preview.codeSnippets.apiRoute = `// app/api/${sampleTable}/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getDatabase } from '@/lib/database';
+
+export async function GET(request: NextRequest) {
+  try {
+    const db = await getDatabase();
+    // Implementation based on your ${database} schema
+    const results = await db.query('SELECT * FROM ${sampleTable} LIMIT 10');
+    return NextResponse.json(results.rows);
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to fetch ${sampleTable}' },
+      { status: 500 }
+    );
+  }
+}`;
+
+      preview.codeSnippets.types = `// types/database.ts
+export interface ${capitalize(sampleTable)} {
+  id: number;
+  // Fields will be generated based on actual schema
+  created_at: Date;
+  updated_at: Date;
+}`;
+    }
+  }
+
+  // Next steps for user
+  preview.nextSteps = [
+    "Review the generated file structure",
+    "Confirm the code snippets look correct",
+    "Run the generation command to create files",
+    "Test the generated APIs",
+    "Customize as needed for your use case"
+  ];
+
+  return preview;
+}
+
+/**
+ * Creates a workflow context for cross-agent communication
+ */
+function createWorkflowContext(contextName: string, intentAnalysis: any, previewData?: any, expiresInMinutes: number = 60) {
+  const context = {
+    id: contextName,
+    created: new Date().toISOString(),
+    expires: new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString(),
+    intentAnalysis,
+    previewData,
+    status: 'ready',
+    instructions: {
+      forCopilot: `Use this context to generate APIs based on the analyzed intent. The database is ${intentAnalysis.database} with framework ${intentAnalysis.framework}.`,
+      forClaude: `Context created for API generation. Share this with GitHub Copilot using: "Using context ${contextName}, generate the APIs"`,
+    }
+  };
+
+  // Store in memory (in production, use Redis or database)
+  workflowContexts.set(contextName, context);
+
+  // Clean up expired contexts
+  setTimeout(() => {
+    workflowContexts.delete(contextName);
+  }, expiresInMinutes * 60 * 1000);
+
+  return context;
+}
+
+/**
+ * Helper function to capitalize strings
+ */
+function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * List all workflow contexts with optional filtering
+ */
+function listWorkflowContexts(includeExpired: boolean = false) {
+  const now = new Date();
+  const contexts = Array.from(workflowContexts.entries()).map(([name, context]) => ({
+    name,
+    ...context,
+    isExpired: new Date(context.expires) < now
+  }));
+
+  if (!includeExpired) {
+    return contexts.filter(c => !c.isExpired);
+  }
+
+  return contexts;
+}
+
+/**
+ * Search workflow contexts by criteria
+ */
+function searchWorkflowContexts(keywords?: string[], database?: string, framework?: string) {
+  const contexts = listWorkflowContexts(false); // Only active contexts
+  
+  return contexts.filter(context => {
+    // Filter by database
+    if (database && context.intentAnalysis?.database !== database) {
+      return false;
+    }
+
+    // Filter by framework
+    if (framework && context.intentAnalysis?.framework !== framework) {
+      return false;
+    }
+
+    // Filter by keywords
+    if (keywords && keywords.length > 0) {
+      const searchText = `${context.name} ${context.intentAnalysis?.originalRequest || ''}`.toLowerCase();
+      return keywords.some(keyword => searchText.includes(keyword.toLowerCase()));
+    }
+
+    return true;
+  });
+}
+
+/**
+ * Get a specific workflow context by name
+ */
+function getWorkflowContext(contextName: string) {
+  const context = workflowContexts.get(contextName);
+  
+  if (!context) {
+    throw new Error(`Context '${contextName}' not found`);
+  }
+
+  // Check if expired
+  if (new Date(context.expires) < new Date()) {
+    workflowContexts.delete(contextName);
+    throw new Error(`Context '${contextName}' has expired`);
+  }
+
+  return {
+    name: contextName,
+    ...context,
+    isExpired: false
+  };
+}
 
 // Schema extraction functions
 async function getPostgresSchema(tableName?: string, includeSampleData = false) {
@@ -590,10 +888,6 @@ function formatSchemaForCodegen(schema: any, dbType: string, targetFramework: st
   return result;
 }
 
-function capitalize(str: string) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
 function formatResult(result: any): string {
   if (Array.isArray(result)) {
     return JSON.stringify(result, null, 2);
@@ -777,6 +1071,151 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {},
+          additionalProperties: false
+        },
+      },
+      {
+        name: "analyze_intent",
+        description:
+          "Analyze natural language intent for API generation. Parses user requests like 'generate user management APIs' and returns structured analysis of what should be generated.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            user_request: {
+              type: "string",
+              description: "Natural language description of what the user wants to generate (e.g., 'create user management APIs with authentication')"
+            },
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Target database type"
+            },
+            framework: {
+              type: "string",
+              enum: ["nextjs", "express", "nestjs", "fastapi", "generic"],
+              description: "Target framework for code generation"
+            }
+          },
+          required: ["user_request", "database"],
+          additionalProperties: false
+        },
+      },
+      {
+        name: "generate_preview",
+        description:
+          "Generate a preview of API code that will be created based on analyzed intent. Shows file structure, code snippets, and asks for confirmation before creating actual files.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            intent_analysis: {
+              type: "object",
+              description: "Output from analyze_intent tool"
+            },
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Target database type"
+            },
+            framework: {
+              type: "string",
+              enum: ["nextjs", "express", "nestjs", "fastapi", "generic"],
+              description: "Target framework for code generation",
+              default: "generic"
+            },
+            include_tests: {
+              type: "boolean",
+              description: "Include test files in preview",
+              default: false
+            }
+          },
+          required: ["intent_analysis", "database"],
+          additionalProperties: false
+        },
+      },
+      {
+        name: "create_workflow_context",
+        description:
+          "Create a shareable context between AI agents (Claude Desktop ↔ GitHub Copilot). Stores analysis and preview for cross-agent collaboration.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            context_name: {
+              type: "string",
+              description: "Unique name for this workflow context"
+            },
+            intent_analysis: {
+              type: "object",
+              description: "Analyzed intent from analyze_intent tool"
+            },
+            preview_data: {
+              type: "object",
+              description: "Preview data from generate_preview tool"
+            },
+            expires_in_minutes: {
+              type: "number",
+              description: "Context expiration time in minutes",
+              default: 60
+            }
+          },
+          required: ["context_name", "intent_analysis"],
+          additionalProperties: false
+        },
+      },
+      {
+        name: "list_contexts",
+        description:
+          "List all available workflow contexts for interactive selection. Shows context names, creation times, and expiration status.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            include_expired: {
+              type: "boolean",
+              description: "Include expired contexts in the list",
+              default: false
+            }
+          },
+          additionalProperties: false
+        },
+      },
+      {
+        name: "search_contexts",
+        description:
+          "Search workflow contexts by keywords, database type, or framework. Useful for finding relevant contexts when multiple exist.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            keywords: {
+              type: "array",
+              items: { type: "string" },
+              description: "Keywords to search for in context names and intent analysis"
+            },
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Filter by database type"
+            },
+            framework: {
+              type: "string",
+              enum: ["nextjs", "express", "nestjs", "fastapi", "generic"],
+              description: "Filter by target framework"
+            }
+          },
+          additionalProperties: false
+        },
+      },
+      {
+        name: "get_context",
+        description:
+          "Retrieve a specific workflow context by name. Used by GitHub Copilot and other AI tools to access context created by Claude Desktop.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            context_name: {
+              type: "string",
+              description: "Name of the workflow context to retrieve"
+            }
+          },
+          required: ["context_name"],
           additionalProperties: false
         },
       },
@@ -979,6 +1418,125 @@ server.setRequestHandler(
           return {
             content: [
               { type: "text", text: JSON.stringify(profiles, null, 2) },
+            ],
+          };
+        }
+        case "analyze_intent": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(AnalyzeIntentSchema, args);
+          const { user_request, database, framework } = validatedArgs;
+          
+          // Log the intent analysis request
+          logSecurityEvent("analyze_intent_attempt", {
+            user_request: user_request.substring(0, 100), // Truncate for security
+            database,
+            framework
+          });
+
+          // Analyze the user's natural language request
+          const analysis = analyzeUserIntent(user_request, database, framework || "generic");
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(analysis, null, 2) },
+            ],
+          };
+        }
+        case "generate_preview": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(GeneratePreviewSchema, args);
+          const { intent_analysis, database, framework, include_tests } = validatedArgs;
+          
+          // Log the preview generation request
+          logSecurityEvent("generate_preview_attempt", {
+            database,
+            framework,
+            include_tests: !!include_tests,
+            tables_count: (intent_analysis as any)?.tables?.length || 0
+          });
+
+          // Generate preview based on intent analysis
+          const preview = await generateCodePreview(intent_analysis, database, framework || "generic", include_tests || false);
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(preview, null, 2) },
+            ],
+          };
+        }
+        case "create_workflow_context": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(CreateWorkflowContextSchema, args);
+          const { context_name, intent_analysis, preview_data, expires_in_minutes } = validatedArgs;
+          
+          // Log context creation
+          logSecurityEvent("create_workflow_context_attempt", {
+            context_name,
+            expires_in_minutes: expires_in_minutes || 60
+          });
+
+          // Store context for cross-agent communication
+          const context = createWorkflowContext(context_name, intent_analysis, preview_data, expires_in_minutes || 60);
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(context, null, 2) },
+            ],
+          };
+        }
+        case "list_contexts": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(ListContextsSchema, args);
+          const { include_expired } = validatedArgs;
+          
+          // Log context listing request
+          logSecurityEvent("list_contexts_attempt", {
+            include_expired: !!include_expired
+          });
+
+          const contexts = listWorkflowContexts(include_expired || false);
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(contexts, null, 2) },
+            ],
+          };
+        }
+        case "search_contexts": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(SearchContextsSchema, args);
+          const { keywords, database, framework } = validatedArgs;
+          
+          // Log context search request
+          logSecurityEvent("search_contexts_attempt", {
+            keywords,
+            database,
+            framework
+          });
+
+          const contexts = searchWorkflowContexts(keywords, database, framework);
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(contexts, null, 2) },
+            ],
+          };
+        }
+        case "get_context": {
+          // Security: Validate input using new schema
+          const validatedArgs = validateInput(GetContextSchema, args);
+          const { context_name } = validatedArgs;
+          
+          // Log context retrieval request
+          logSecurityEvent("get_context_attempt", {
+            context_name
+          });
+
+          const context = getWorkflowContext(context_name);
+
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(context, null, 2) },
             ],
           };
         }

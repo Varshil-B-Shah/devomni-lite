@@ -13,7 +13,13 @@ import {
   UnifiedQuerySchema, 
   GetDatabaseSchemaSchema,
   ListDatabaseTablesSchema,
-  ExportSchemaForCodegenSchema
+  ExportSchemaForCodegenSchema,
+  AnalyzeIntentSchema,
+  GeneratePreviewSchema,
+  CreateWorkflowContextSchema,
+  ListContextsSchema,
+  SearchContextsSchema,
+  GetContextSchema
 } from "./inputValidator.js";
 
 const app = express();
@@ -32,6 +38,95 @@ const mongoDb = new MongoAdapter(
   process.env.MONGODB_URI!,
   process.env.MONGODB_DATABASE!
 );
+
+// Context management storage (shared with MCP server)
+const workflowContexts = new Map<string, any>();
+
+// Context management functions (copied from mcp-server.ts)
+function analyzeUserIntent(userRequest: string, database: string, framework: string) {
+  // Simple analysis - could be enhanced with NLP
+  const tables = extractTableNamesFromRequest(userRequest);
+  
+  return {
+    originalRequest: userRequest,
+    database,
+    framework,
+    detectedTables: tables,
+    complexity: tables.length > 3 ? 'complex' : 'medium',
+    suggestedEndpoints: tables.map(table => `/${table.toLowerCase()}`),
+    features: extractFeaturesFromRequest(userRequest)
+  };
+}
+
+function extractTableNamesFromRequest(request: string): string[] {
+  const commonWords = ['user', 'product', 'order', 'customer', 'category', 'payment', 'inventory'];
+  return commonWords.filter(word => 
+    request.toLowerCase().includes(word) || request.toLowerCase().includes(word + 's')
+  );
+}
+
+function extractFeaturesFromRequest(request: string): string[] {
+  const features = [];
+  if (request.toLowerCase().includes('auth')) features.push('authentication');
+  if (request.toLowerCase().includes('crud')) features.push('crud-operations');
+  if (request.toLowerCase().includes('api')) features.push('rest-api');
+  return features;
+}
+
+function createWorkflowContext(contextName: string, intentAnalysis: any, previewData?: any, expiresInMinutes: number = 60) {
+  const context = {
+    contextName,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString(),
+    intentAnalysis,
+    previewData,
+    status: 'ready'
+  };
+
+  workflowContexts.set(contextName, context);
+
+  // Auto-cleanup expired contexts
+  setTimeout(() => {
+    workflowContexts.delete(contextName);
+  }, expiresInMinutes * 60 * 1000);
+
+  return context;
+}
+
+function listWorkflowContexts(includeExpired: boolean = false) {
+  const now = new Date();
+  const contexts = Array.from(workflowContexts.entries()).map(([name, context]) => ({
+    contextName: name,
+    ...context,
+    isExpired: new Date(context.expiresAt) < now
+  }));
+
+  if (!includeExpired) {
+    return contexts.filter(c => !c.isExpired);
+  }
+
+  return contexts;
+}
+
+function getWorkflowContext(contextName: string) {
+  const context = workflowContexts.get(contextName);
+  
+  if (!context) {
+    throw new Error(`Context '${contextName}' not found`);
+  }
+
+  // Check if expired
+  if (new Date(context.expiresAt) < new Date()) {
+    workflowContexts.delete(contextName);
+    throw new Error(`Context '${contextName}' has expired`);
+  }
+
+  return {
+    contextName,
+    ...context,
+    isExpired: false
+  };
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -118,6 +213,42 @@ app.post("/mcp-tool", async (req, res) => {
         }
         
         result = { content: [{ type: "text", text: JSON.stringify(codegenSchema, null, 2) }] };
+        break;
+      }
+      
+      case "analyze_intent": {
+        const validatedArgs = validateInput(AnalyzeIntentSchema, args);
+        const { user_request, database, framework } = validatedArgs;
+        
+        const analysis = analyzeUserIntent(user_request, database, framework || "generic");
+        result = { content: [{ type: "text", text: JSON.stringify(analysis, null, 2) }] };
+        break;
+      }
+      
+      case "create_workflow_context": {
+        const validatedArgs = validateInput(CreateWorkflowContextSchema, args);
+        const { context_name, intent_analysis, preview_data, expires_in_minutes } = validatedArgs;
+        
+        const context = createWorkflowContext(context_name, intent_analysis, preview_data, expires_in_minutes || 60);
+        result = { content: [{ type: "text", text: JSON.stringify(context, null, 2) }] };
+        break;
+      }
+      
+      case "list_contexts": {
+        const validatedArgs = validateInput(ListContextsSchema, args);
+        const { include_expired } = validatedArgs;
+        
+        const contexts = listWorkflowContexts(include_expired || false);
+        result = { content: [{ type: "text", text: JSON.stringify({ contexts }, null, 2) }] };
+        break;
+      }
+      
+      case "get_context": {
+        const validatedArgs = validateInput(GetContextSchema, args);
+        const { context_name } = validatedArgs;
+        
+        const context = getWorkflowContext(context_name);
+        result = { content: [{ type: "text", text: JSON.stringify(context, null, 2) }] };
         break;
       }
       

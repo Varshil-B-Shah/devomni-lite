@@ -81,6 +81,30 @@
         "title": "Test Database Connection",
         "category": "DevOmni",
         "icon": "$(plug)"
+      },
+      {
+        "command": "devomni.listContexts",
+        "title": "List Available Workflow Contexts",
+        "category": "DevOmni",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "devomni.searchContexts",
+        "title": "Search Workflow Contexts",
+        "category": "DevOmni",
+        "icon": "$(search)"
+      },
+      {
+        "command": "devomni.getContext",
+        "title": "Get Workflow Context",
+        "category": "DevOmni",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "devomni.createContext",
+        "title": "Create New Workflow Context",
+        "category": "DevOmni",
+        "icon": "$(add)"
       }
     ],
     "menus": {

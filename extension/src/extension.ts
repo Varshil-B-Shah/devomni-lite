@@ -137,6 +137,134 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Context management commands
+    const listContextsCommand = vscode.commands.registerCommand('devomni.listContexts', async () => {
+        try {
+            const result = await mcpClient.callTool('list_contexts', {});
+            const contexts = JSON.parse(result.content[0].text);
+            
+            if (contexts.length === 0) {
+                vscode.window.showInformationMessage('No workflow contexts found. Create some in Claude Desktop first!');
+                return;
+            }
+
+            const items = contexts.map((ctx: any) => ({
+                label: ctx.name || ctx.contextName,
+                description: `${ctx.intentAnalysis?.database || 'Unknown'} | ${ctx.intentAnalysis?.framework || 'Generic'}`,
+                detail: ctx.intentAnalysis?.originalRequest || 'No description'
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Available workflow contexts'
+            });
+
+            if (selected) {
+                vscode.window.showInformationMessage(`Selected context: ${(selected as any).label}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to list contexts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const searchContextsCommand = vscode.commands.registerCommand('devomni.searchContexts', async () => {
+        try {
+            const keyword = await vscode.window.showInputBox({
+                prompt: 'Enter keyword to search for',
+                placeHolder: 'e.g., user management, ecommerce, auth'
+            });
+
+            if (!keyword) return;
+
+            const result = await mcpClient.callTool('search_contexts', {
+                keywords: [keyword]
+            });
+            const contexts = JSON.parse(result.content[0].text);
+            
+            if (contexts.length === 0) {
+                vscode.window.showInformationMessage(`No contexts found matching "${keyword}"`);
+                return;
+            }
+
+            const items = contexts.map((ctx: any) => ({
+                label: ctx.name || ctx.contextName,
+                description: `${ctx.intentAnalysis?.database || 'Unknown'} | ${ctx.intentAnalysis?.framework || 'Generic'}`,
+                detail: ctx.intentAnalysis?.originalRequest || 'No description'
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: `Found ${contexts.length} context(s) matching "${keyword}"`
+            });
+
+            if (selected) {
+                vscode.window.showInformationMessage(`Selected context: ${(selected as any).label}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to search contexts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const getContextCommand = vscode.commands.registerCommand('devomni.getContext', async () => {
+        try {
+            const contextName = await vscode.window.showInputBox({
+                prompt: 'Enter context name to retrieve',
+                placeHolder: 'e.g., user_management_context'
+            });
+
+            if (!contextName) return;
+
+            const result = await mcpClient.callTool('get_context', {
+                context_name: contextName
+            });
+            const context = JSON.parse(result.content[0].text);
+            
+            // Show context details in a new document
+            const doc = await vscode.workspace.openTextDocument({
+                content: JSON.stringify(context, null, 2),
+                language: 'json'
+            });
+            await vscode.window.showTextDocument(doc);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to get context: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
+    const createContextCommand = vscode.commands.registerCommand('devomni.createContext', async () => {
+        try {
+            const contextName = await vscode.window.showInputBox({
+                prompt: 'Enter a name for the new context',
+                placeHolder: 'e.g., my_project_api_context'
+            });
+
+            if (!contextName) return;
+
+            const userRequest = await vscode.window.showInputBox({
+                prompt: 'Describe what you want to generate',
+                placeHolder: 'e.g., user management APIs with authentication'
+            });
+
+            if (!userRequest) return;
+
+            // Analyze intent first
+            const intentResult = await mcpClient.callTool('analyze_intent', {
+                user_request: userRequest,
+                database: 'postgres', // Default, user can change
+                framework: 'nextjs'   // Default, user can change
+            });
+            const intentAnalysis = JSON.parse(intentResult.content[0].text);
+
+            // Create the context
+            const result = await mcpClient.callTool('create_workflow_context', {
+                context_name: contextName,
+                intent_analysis: intentAnalysis,
+                expires_in_minutes: 60
+            });
+
+            vscode.window.showInformationMessage(`Created workflow context: ${contextName}`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to create context: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    });
+
     // Add to subscriptions
     context.subscriptions.push(
         generateAPIsCommand,
@@ -148,7 +276,11 @@ export function activate(context: vscode.ExtensionContext) {
         switchDatabaseCommand,
         switchFrameworkCommand,
         manageProfilesCommand,
-        testConnectionCommand
+        testConnectionCommand,
+        listContextsCommand,
+        searchContextsCommand,
+        getContextCommand,
+        createContextCommand
     );
 
     // Auto-refresh schema on activation if enabled

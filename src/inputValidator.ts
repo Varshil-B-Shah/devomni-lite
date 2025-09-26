@@ -270,3 +270,46 @@ export function logSecurityEvent(event: string, details: any) {
   const timestamp = new Date().toISOString();
   console.warn(`[SECURITY ${timestamp}] ${event}:`, JSON.stringify(details, null, 2));
 }
+
+// New validation schemas for preview-based workflow
+
+export const AnalyzeIntentSchema = z.object({
+  user_request: z.string()
+    .min(1, "User request cannot be empty")
+    .max(500, "User request too long"),
+  database: z.enum(["postgres", "mysql", "mongo"]),
+  framework: z.enum(["nextjs", "express", "nestjs", "fastapi", "generic"]).optional()
+});
+
+export const GeneratePreviewSchema = z.object({
+  intent_analysis: z.object({}).passthrough(), // Allow any object structure
+  database: z.enum(["postgres", "mysql", "mongo"]),
+  framework: z.enum(["nextjs", "express", "nestjs", "fastapi", "generic"]).optional(),
+  include_tests: z.boolean().optional()
+});
+
+export const CreateWorkflowContextSchema = z.object({
+  context_name: z.string()
+    .min(1, "Context name cannot be empty")
+    .max(100, "Context name too long")
+    .regex(/^[a-zA-Z0-9_-]+$/, "Context name can only contain letters, numbers, underscore, and dash"),
+  intent_analysis: z.object({}).passthrough(),
+  preview_data: z.object({}).passthrough().optional(),
+  expires_in_minutes: z.number().min(1).max(1440).optional() // Max 24 hours
+});
+
+export const ListContextsSchema = z.object({
+  include_expired: z.boolean().optional()
+});
+
+export const SearchContextsSchema = z.object({
+  keywords: z.array(z.string()).optional(),
+  database: z.enum(["postgres", "mysql", "mongo"]).optional(),
+  framework: z.enum(["nextjs", "express", "nestjs", "fastapi", "generic"]).optional()
+});
+
+export const GetContextSchema = z.object({
+  context_name: z.string()
+    .min(1, "Context name cannot be empty")
+    .max(100, "Context name too long")
+});
