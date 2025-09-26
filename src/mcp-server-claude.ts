@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -159,7 +161,7 @@ try {
 try {
   mongoDb = connectionManager.getConnection('mongo', 'default');
 } catch (e) {
-  console.error('No MongoDB default profile found');
+  console.warn('No MongoDB default profile found');
 }
 
 // Use shared context storage for cross-agent communication
