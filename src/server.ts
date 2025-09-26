@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import os from 'os';
 
 // Load environment variables silently (no debug output)
 dotenv.config({ debug: false });
@@ -43,6 +44,13 @@ const mongoDb = new MongoAdapter(
 
 // Initialize profile manager
 const profileManager = new ProfileManager();
+
+// Debug: Log profile manager paths
+console.log('🔍 Profile Manager Debug Info:');
+console.log('  Project Root:', process.cwd());
+console.log('  Project Profiles Path:', `${process.cwd()}\\.devomni\\profiles.json`);
+console.log('  Active Profile Path:', `${process.cwd()}\\.devomni\\active-profile.txt`);
+console.log('  Global Profiles Path:', `${os.homedir()}\\.devomni\\global-profiles.json`);
 
 // Use shared context storage (same as MCP server)
 const sharedStorage = new SharedContextStorage();
@@ -217,6 +225,14 @@ app.post("/mcp-tool", async (req, res) => {
       case "list_profiles": {
         const profileInfo = await profileManager.getProfileInfo();
         const activeProfile = await profileManager.getActiveProfile();
+        const allProfiles = await profileManager.getAllProfiles();
+        
+        // Debug logging
+        console.log('🔍 List Profiles Debug:');
+        console.log('  Found profiles:', profileInfo.map(p => p.name));
+        console.log('  Active profile:', activeProfile);
+        console.log('  Raw profile config:', JSON.stringify(allProfiles, null, 2));
+        
         result = { content: [{ 
           type: "text", 
           text: JSON.stringify({ 
@@ -238,7 +254,8 @@ app.post("/mcp-tool", async (req, res) => {
       }
 
       case "switch_profile": {
-        const { profileName } = args as { profileName: string };
+        // Accept both profileName and profile_name for compatibility
+        const profileName = (args as any).profileName || (args as any).profile_name;
         if (!profileName) {
           throw new Error("Profile name is required");
         }

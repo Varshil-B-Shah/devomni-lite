@@ -42,10 +42,19 @@ export class ProfileManager {
   private activeProfilePath: string;
 
   constructor(projectRoot: string = process.cwd()) {
-    this.projectRoot = projectRoot;
+    // Force both Claude and VS Code to use the same project directory
+    // This ensures perfect synchronization
+    const forcedProjectRoot = "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite";
+    
+    this.projectRoot = forcedProjectRoot;
     this.globalProfilesPath = path.join(os.homedir(), '.devomni', 'global-profiles.json');
-    this.projectProfilesPath = path.join(projectRoot, '.devomni', 'profiles.json');
-    this.activeProfilePath = path.join(projectRoot, '.devomni', 'active-profile.txt');
+    this.projectProfilesPath = path.join(forcedProjectRoot, '.devomni', 'profiles.json');
+    this.activeProfilePath = path.join(forcedProjectRoot, '.devomni', 'active-profile.txt');
+    
+    // Debug logging
+    console.log('📂 ProfileManager initialized:');
+    console.log('  Project Root:', this.projectRoot);
+    console.log('  Profiles Path:', this.projectProfilesPath);
   }
 
   /**
