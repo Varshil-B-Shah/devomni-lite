@@ -1,17 +1,3 @@
-#!/usr/bin/env node
-
-/**
- * DevOmni MCP Server - Claude Desktop Edition
- * 
- * FULL ACCESS SERVER for Claude Desktop:
- * - Database schema access
- * - Intent analysis 
- * - Preview generation
- * - Context management
- * 
- * Role: Strategic Planning & Analysis Agent
- */
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
