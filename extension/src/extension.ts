@@ -517,11 +517,11 @@ async function setupMCPHandler() {
         // Create MCP configuration
         const mcpConfig = {
             "servers": {
-                "devomni": {
+                "devomni-copilot": {
                     "type": "stdio",
                     "command": "node",
                     "args": [
-                        "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite\\dist\\mcp-server.js"
+                        "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite\\dist\\mcp-server-copilot.js"
                     ]
                 }
             }
