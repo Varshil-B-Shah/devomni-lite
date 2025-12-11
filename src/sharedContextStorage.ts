@@ -1,16 +1,23 @@
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
 
+dotenv.config({ debug: false });
 /**
  * Shared context storage using file system
  * Both MCP server and HTTP server can read/write to the same storage
  */
 export class SharedContextStorage {
     private contextFile: string;
+    private projectRoot: string;
 
-    constructor() {
-        // Store contexts in a shared file
-        this.contextFile = path.join(process.cwd(), '.devomni', 'workflow-contexts.json');
+    constructor(projectRoot?: string) {
+        // Allow callers/env to control where contexts are stored so multiple workspaces stay isolated
+        const envRoot = process.env.DEVOMNI_PROJECT_ROOT || process.env.PROJECT_ROOT || process.env.PROJECT_PATH;
+        this.projectRoot = path.resolve(projectRoot || envRoot || process.cwd());
+        
+        // Store contexts in a shared file in the project root
+        this.contextFile = path.join(this.projectRoot, '.devomni', 'workflow-contexts.json');
         this.ensureContextFile();
     }
 
@@ -44,12 +51,20 @@ export class SharedContextStorage {
         const data = this.readContexts();
         
         const context = {
+            id: contextName,
+            name: contextName,
             contextName,
+            created: new Date().toISOString(),
+            expires: new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString(),
             createdAt: new Date().toISOString(),
             expiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString(),
             intentAnalysis,
             previewData,
-            status: 'ready'
+            status: 'ready',
+            instructions: {
+                forClaude: `Use this context to understand the user's intent for ${contextName}. The context contains analyzed requirements and preview data.`,
+                forCopilot: `Generate code based on this context: ${contextName}. Use the intent analysis and preview data to create appropriate API implementations.`
+            }
         };
 
         data.contexts[contextName] = context;
@@ -63,9 +78,10 @@ export class SharedContextStorage {
         const now = new Date();
         
         const contexts = Object.entries(data.contexts).map(([name, context]) => ({
+            name,
             contextName: name,
             ...context,
-            isExpired: new Date((context as any).expiresAt) < now
+            isExpired: new Date((context as any).expiresAt || (context as any).expires) < now
         }));
 
         if (!includeExpired) {
@@ -83,14 +99,16 @@ export class SharedContextStorage {
             throw new Error(`Context '${contextName}' not found`);
         }
 
-        // Check if expired
-        if (new Date(context.expiresAt) < new Date()) {
+        // Check if expired using both field names for backward compatibility
+        const expiresAt = context.expiresAt || context.expires;
+        if (expiresAt && new Date(expiresAt) < new Date()) {
             delete data.contexts[contextName];
             this.writeContexts(data);
             throw new Error(`Context '${contextName}' has expired`);
         }
 
         return {
+            name: contextName,
             contextName,
             ...context,
             isExpired: false

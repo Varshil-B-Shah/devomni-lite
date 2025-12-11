@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import dotenv from 'dotenv';
 
 /**
  * Enhanced Profile Manager for Project-Based Database Configurations
@@ -16,6 +17,8 @@ import os from 'os';
  * 2. Global profiles (~/.devomni/global-profiles.json)
  * 3. Environment variables (backward compatibility)
  */
+
+dotenv.config({ debug: false });
 
 export interface DatabaseProfile {
   postgres?: string;
@@ -42,19 +45,12 @@ export class ProfileManager {
   private activeProfilePath: string;
 
   constructor(projectRoot: string = process.cwd()) {
-    // Force both Claude and VS Code to use the same project directory
-    // This ensures perfect synchronization
-    const forcedProjectRoot = "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite";
-    
-    this.projectRoot = forcedProjectRoot;
+    // Allow env override so different workspaces can opt into a shared or custom root
+    const envRoot = process.env.DEVOMNI_PROJECT_ROOT || process.env.PROJECT_ROOT || process.env.PROJECT_PATH;
+    this.projectRoot = path.resolve(envRoot || projectRoot || process.cwd());
     this.globalProfilesPath = path.join(os.homedir(), '.devomni', 'global-profiles.json');
-    this.projectProfilesPath = path.join(forcedProjectRoot, '.devomni', 'profiles.json');
-    this.activeProfilePath = path.join(forcedProjectRoot, '.devomni', 'active-profile.txt');
-    
-    // Debug logging
-    console.log('📂 ProfileManager initialized:');
-    console.log('  Project Root:', this.projectRoot);
-    console.log('  Profiles Path:', this.projectProfilesPath);
+    this.projectProfilesPath = path.join(this.projectRoot, '.devomni', 'profiles.json');
+    this.activeProfilePath = path.join(this.projectRoot, '.devomni', 'active-profile.txt');
   }
 
   /**

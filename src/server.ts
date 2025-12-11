@@ -29,6 +29,8 @@ const app = express();
 app.use(express.json());
 app.use(cors()); // Allow cross-origin requests from VS Code extension
 
+const PORT = Number(process.env.DEVOMNI_HTTP_PORT || process.env.PORT || 3000);
+
 const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
 const mysqlDb = new MySQLAdapter({
   host: process.env.MYSQL_HOST!,
@@ -45,12 +47,7 @@ const mongoDb = new MongoAdapter(
 // Initialize profile manager
 const profileManager = new ProfileManager();
 
-// Debug: Log profile manager paths
-console.log('🔍 Profile Manager Debug Info:');
-console.log('  Project Root:', process.cwd());
-console.log('  Project Profiles Path:', `${process.cwd()}\\.devomni\\profiles.json`);
-console.log('  Active Profile Path:', `${process.cwd()}\\.devomni\\active-profile.txt`);
-console.log('  Global Profiles Path:', `${os.homedir()}\\.devomni\\global-profiles.json`);
+// Profile manager paths configured silently
 
 // Use shared context storage (same as MCP server)
 const sharedStorage = new SharedContextStorage();
@@ -100,19 +97,14 @@ function getWorkflowContext(contextName: string) {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  console.log('🏥 Health check requested');
-  res.json({ status: 'OK', message: 'DevOmni HTTP server is running', port: 3000 });
+  res.json({ status: 'OK', message: 'DevOmni HTTP server is running', port: PORT });
 });
 
 // MCP Tool endpoint for VS Code extension
 app.post("/mcp-tool", async (req, res) => {
   const { toolName, arguments: args } = req.body;
   
-  // Debug logging
-  console.log('🔍 HTTP Request Debug:');
-  console.log('  Tool Name:', toolName);
-  console.log('  Arguments:', JSON.stringify(args, null, 2));
-  console.log('  Full Body:', JSON.stringify(req.body, null, 2));
+  // Request processed silently
   
   try {
     let result;
@@ -228,10 +220,7 @@ app.post("/mcp-tool", async (req, res) => {
         const allProfiles = await profileManager.getAllProfiles();
         
         // Debug logging
-        console.log('🔍 List Profiles Debug:');
-        console.log('  Found profiles:', profileInfo.map(p => p.name));
-        console.log('  Active profile:', activeProfile);
-        console.log('  Raw profile config:', JSON.stringify(allProfiles, null, 2));
+        // Profile information retrieved
         
         result = { content: [{ 
           type: "text", 
@@ -249,6 +238,21 @@ app.post("/mcp-tool", async (req, res) => {
         result = { content: [{ 
           type: "text", 
           text: JSON.stringify({ activeProfile }, null, 2) 
+        }] };
+        break;
+      }
+
+      case "list_connection_profiles": {
+        const allProfiles = await profileManager.getAllProfiles();
+        const profiles = Object.entries(allProfiles.profiles).map(([name, config]) => ({
+          name,
+          databases: Object.keys(config).filter(db => config[db as keyof typeof config]),
+          isActive: name === allProfiles.activeProfile,
+          source: 'project'
+        }));
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify(profiles, null, 2) 
         }] };
         break;
       }
@@ -292,7 +296,8 @@ app.post("/mcp-tool", async (req, res) => {
       }
 
       case "delete_profile": {
-        const { profileName } = args as { profileName: string };
+        // Accept both profileName and profile_name for compatibility
+        const profileName = (args as any).profileName || (args as any).profile_name;
         if (!profileName) {
           throw new Error("Profile name is required");
         }
@@ -580,4 +585,4 @@ function formatSchemaForCodegen(schema: any, dbType: string, targetFramework: st
   return result;
 }
 
-app.listen(3000, () => console.log("DevOmni HTTP server running on port 3000"));
+app.listen(PORT, () => console.log(`DevOmni HTTP server running on port ${PORT}`));
