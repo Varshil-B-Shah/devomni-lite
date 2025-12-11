@@ -9,8 +9,11 @@ export class SharedContextStorage {
     private contextFile: string;
 
     constructor() {
-        // Store contexts in a shared file
-        this.contextFile = path.join(process.cwd(), '.devomni', 'workflow-contexts.json');
+        // Use the same project root as ProfileManager (hardcoded for sync)
+        const projectRoot = "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite";
+        
+        // Store contexts in a shared file in the project root
+        this.contextFile = path.join(projectRoot, '.devomni', 'workflow-contexts.json');
         this.ensureContextFile();
     }
 
