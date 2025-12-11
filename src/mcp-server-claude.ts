@@ -23,6 +23,7 @@ const UnifiedQuerySchema = z.object({
   collection: z.string().optional(),
   filter: z.object({}).passthrough().optional(),
   projection: z.object({}).passthrough().optional(),
+  profile: z.string().optional(),
 }).refine(data => {
   if (data.database === 'mongo') {
     return data.collection !== undefined;
@@ -464,6 +465,41 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      {
+        name: "unified_query",
+        description: "Query any database (Postgres, MySQL, MongoDB) using the active or specified profile",
+        inputSchema: {
+          type: "object",
+          properties: {
+            database: {
+              type: "string",
+              enum: ["postgres", "mysql", "mongo"],
+              description: "Which database to query",
+            },
+            query: {
+              type: "string",
+              description: "SQL query for Postgres/MySQL (ignored for MongoDB)",
+            },
+            collection: {
+              type: "string",
+              description: "MongoDB collection name (Mongo only)",
+            },
+            filter: {
+              type: "object",
+              description: "MongoDB filter (Mongo only)",
+            },
+            projection: {
+              type: "object",
+              description: "MongoDB projection (Mongo only)",
+            },
+            profile: {
+              type: "string",
+              description: "Optional profile name; defaults to active profile",
+            },
+          },
+          required: ["database"],
+        },
+      },
       // SCHEMA ACCESS TOOLS (Claude only)
       {
         name: "get_database_schema",
@@ -767,6 +803,44 @@ server.setRequestHandler(
     
     try {
       switch (name) {
+        case "unified_query": {
+          const { database, query, collection, filter = {}, projection = {}, profile } = validateInput(UnifiedQuerySchema, args as any);
+
+          logSecurityEvent("unified_query_attempt", {
+            database,
+            hasQuery: !!query,
+            hasCollection: !!collection,
+            profile: profile || "active"
+          });
+
+          if (database === 'postgres') {
+            const pgDb = await connectionManager.getConnection('postgres', profile);
+            const result = await pgDb.query(query!);
+            return {
+              content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }],
+            };
+          }
+
+          if (database === 'mysql') {
+            const mysqlDb = await connectionManager.getConnection('mysql', profile);
+            const result = await mysqlDb.query(query!);
+            const rows = (result as any).rows || result;
+            return {
+              content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
+            };
+          }
+
+          if (database === 'mongo') {
+            const mongoDb = await connectionManager.getConnection('mongo', profile);
+            const rows = await mongoDb.find(collection!, filter, projection);
+            return {
+              content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
+            };
+          }
+
+          throw new Error(`Unsupported database: ${database}`);
+        }
+
         case "get_database_schema": {
           const { database, table_name, include_sample_data = false, profile } = args as any;
           
@@ -1012,8 +1086,8 @@ async function getPostgresSchema(tableName?: string, includeSampleData = false, 
   const pgDb = await connectionManager.getConnection('postgres', profile);
   
   const query = tableName
-    ? 'SELECT * FROM information_schema.columns WHERE table_name = $1'
-    : 'SELECT * FROM information_schema.columns ORDER BY table_name, ordinal_position';
+    ? 'SELECT * FROM information_schema.columns WHERE table_schema = \'public\' AND table_name = $1 ORDER BY ordinal_position'
+    : 'SELECT * FROM information_schema.columns WHERE table_schema = \'public\' ORDER BY table_name, ordinal_position';
   
   const params = tableName ? [tableName] : [];
   const result = await pgDb.query(query, params);
@@ -1049,34 +1123,39 @@ async function getMySQLSchema(tableName?: string, includeSampleData = false, pro
   const mysqlDb = await connectionManager.getConnection('mysql', profile);
   
   const query = tableName
-    ? 'SELECT * FROM information_schema.columns WHERE table_name = ? ORDER BY ordinal_position'
-    : 'SELECT * FROM information_schema.columns ORDER BY table_name, ordinal_position';
+    ? 'SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION'
+    : 'SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() ORDER BY TABLE_NAME, ORDINAL_POSITION';
   
   const params = tableName ? [tableName] : [];
   const result = await mysqlDb.query(query, params);
   
   const schema: any = {};
-  const rows = Array.isArray(result) ? result : [result];
+  // MySQL returns result.rows (or sometimes just result depending on adapter)
+  const rows = (result && result.rows) ? result.rows : (Array.isArray(result) ? result : []);
   
   for (const row of rows) {
-    if (!schema[row.table_name || row.TABLE_NAME]) {
-      const table = row.table_name || row.TABLE_NAME;
-      schema[table] = { columns: [] };
+    const tableName = row.TABLE_NAME || row.table_name;
+    const columnName = row.COLUMN_NAME || row.column_name;
+    const dataType = row.DATA_TYPE || row.data_type;
+    const isNullable = row.IS_NULLABLE || row.is_nullable;
+    
+    if (!schema[tableName]) {
+      schema[tableName] = { columns: [] };
     }
-    const table = row.table_name || row.TABLE_NAME;
-    schema[table].columns.push({
-      name: row.column_name || row.COLUMN_NAME,
-      type: row.data_type || row.DATA_TYPE,
-      nullable: (row.is_nullable || row.IS_NULLABLE) === 'YES'
+    schema[tableName].columns.push({
+      name: columnName,
+      type: dataType,
+      nullable: isNullable === 'YES'
     });
   }
 
   if (includeSampleData) {
     for (const tableName of Object.keys(schema)) {
       try {
-        const sampleQuery = `SELECT * FROM ${tableName} LIMIT 3`;
+        const sampleQuery = `SELECT * FROM \`${tableName}\` LIMIT 3`;
         const sampleResult = await mysqlDb.query(sampleQuery);
-        schema[tableName] = { ...schema[tableName], sampleData: (sampleResult as any).rows || sampleResult };
+        const sampleRows = (sampleResult && sampleResult.rows) ? sampleResult.rows : (Array.isArray(sampleResult) ? sampleResult : []);
+        schema[tableName] = { ...schema[tableName], sampleData: sampleRows };
       } catch (e) {
         schema[tableName] = { ...schema[tableName], sampleData: [] };
       }

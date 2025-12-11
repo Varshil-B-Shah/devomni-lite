@@ -50,11 +50,6 @@ export class ProfileManager {
     this.globalProfilesPath = path.join(os.homedir(), '.devomni', 'global-profiles.json');
     this.projectProfilesPath = path.join(forcedProjectRoot, '.devomni', 'profiles.json');
     this.activeProfilePath = path.join(forcedProjectRoot, '.devomni', 'active-profile.txt');
-    
-    // Debug logging
-    console.log('📂 ProfileManager initialized:');
-    console.log('  Project Root:', this.projectRoot);
-    console.log('  Profiles Path:', this.projectProfilesPath);
   }
 
   /**
