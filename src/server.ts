@@ -29,6 +29,8 @@ const app = express();
 app.use(express.json());
 app.use(cors()); // Allow cross-origin requests from VS Code extension
 
+const PORT = Number(process.env.DEVOMNI_HTTP_PORT || process.env.PORT || 3000);
+
 const pgDb = new PostgresAdapter(process.env.PG_CONNECTION_STRING!);
 const mysqlDb = new MySQLAdapter({
   host: process.env.MYSQL_HOST!,
@@ -95,7 +97,7 @@ function getWorkflowContext(contextName: string) {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'DevOmni HTTP server is running', port: 3000 });
+  res.json({ status: 'OK', message: 'DevOmni HTTP server is running', port: PORT });
 });
 
 // MCP Tool endpoint for VS Code extension
@@ -583,4 +585,4 @@ function formatSchemaForCodegen(schema: any, dbType: string, targetFramework: st
   return result;
 }
 
-app.listen(3000, () => console.log("DevOmni HTTP server running on port 3000"));
+app.listen(PORT, () => console.log(`DevOmni HTTP server running on port ${PORT}`));

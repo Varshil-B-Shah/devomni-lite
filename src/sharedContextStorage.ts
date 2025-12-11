@@ -1,19 +1,23 @@
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
 
+dotenv.config({ debug: false });
 /**
  * Shared context storage using file system
  * Both MCP server and HTTP server can read/write to the same storage
  */
 export class SharedContextStorage {
     private contextFile: string;
+    private projectRoot: string;
 
-    constructor() {
-        // Use the same project root as ProfileManager (hardcoded for sync)
-        const projectRoot = "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite";
+    constructor(projectRoot?: string) {
+        // Allow callers/env to control where contexts are stored so multiple workspaces stay isolated
+        const envRoot = process.env.DEVOMNI_PROJECT_ROOT || process.env.PROJECT_ROOT || process.env.PROJECT_PATH;
+        this.projectRoot = path.resolve(projectRoot || envRoot || process.cwd());
         
         // Store contexts in a shared file in the project root
-        this.contextFile = path.join(projectRoot, '.devomni', 'workflow-contexts.json');
+        this.contextFile = path.join(this.projectRoot, '.devomni', 'workflow-contexts.json');
         this.ensureContextFile();
     }
 

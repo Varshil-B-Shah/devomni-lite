@@ -26,7 +26,9 @@ import { SharedContextStorage } from './sharedContextStorage.js';
 // Role: Code Generation Agent (Context Consumer)
 
 // Use shared context storage for cross-agent communication
-const sharedStorage = new SharedContextStorage();
+// Force to use centralized DevOmni project root regardless of where MCP server is called from
+const DEVOMNI_PROJECT_ROOT = process.env.DEVOMNI_PROJECT_ROOT || process.env.PROJECT_ROOT || "C:\\Users\\Varshil\\Desktop\\MyWebApps\\devomni-lite";
+const sharedStorage = new SharedContextStorage(DEVOMNI_PROJECT_ROOT);
 
 // Create the MCP server
 const server = new Server(
