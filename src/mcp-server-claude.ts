@@ -23,6 +23,8 @@ const UnifiedQuerySchema = z.object({
   collection: z.string().optional(),
   filter: z.object({}).passthrough().optional(),
   projection: z.object({}).passthrough().optional(),
+  operation: z.enum(['find', 'insert', 'update', 'delete']).optional().default('find'),
+  document: z.object({}).passthrough().optional(),
   profile: z.string().optional(),
 }).refine(data => {
   if (data.database === 'mongo') {
@@ -84,9 +86,22 @@ class ConnectionManager {
         // MongoDB connections
         if (databases.mongo) {
           try {
-            // Extract database name from MongoDB URI or use default
-            const dbName = databases.mongo.split('/').pop()?.split('?')[0] || 'defaultdb';
-            const adapter = new MongoAdapter(databases.mongo, dbName);
+            let uri: string;
+            let dbName: string;
+            
+            const mongoConfig = databases.mongo as any;
+            
+            // Handle both object format {uri, database} and legacy string format
+            if (typeof mongoConfig === 'object' && mongoConfig.uri) {
+              uri = mongoConfig.uri;
+              dbName = mongoConfig.database || 'defaultdb';
+            } else {
+              // Legacy: string format - extract database name from URI
+              uri = mongoConfig as string;
+              dbName = uri.split('/').pop()?.split('?')[0] || 'defaultdb';
+            }
+            
+            const adapter = new MongoAdapter(uri, dbName);
             this.connections.set(`mongo_${profileName}`, adapter);
             connectionCount++;
           } catch (error) {
@@ -467,7 +482,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "unified_query",
-        description: "Query any database (Postgres, MySQL, MongoDB) using the active or specified profile",
+        description: "Query or modify any database (Postgres, MySQL, MongoDB) using the active or specified profile. For MongoDB: supports find, insert, update, and delete operations.",
         inputSchema: {
           type: "object",
           properties: {
@@ -484,13 +499,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "MongoDB collection name (Mongo only)",
             },
+            operation: {
+              type: "string",
+              enum: ["find", "insert", "update", "delete"],
+              description: "MongoDB operation type (Mongo only). Defaults to 'find'.",
+            },
             filter: {
               type: "object",
-              description: "MongoDB filter (Mongo only)",
+              description: "MongoDB filter for find/update/delete operations (Mongo only)",
             },
             projection: {
               type: "object",
-              description: "MongoDB projection (Mongo only)",
+              description: "MongoDB projection for find operations (Mongo only)",
+            },
+            document: {
+              type: "object",
+              description: "Document to insert or update fields (for insert/update operations in Mongo)",
             },
             profile: {
               type: "string",
@@ -804,12 +828,13 @@ server.setRequestHandler(
     try {
       switch (name) {
         case "unified_query": {
-          const { database, query, collection, filter = {}, projection = {}, profile } = validateInput(UnifiedQuerySchema, args as any);
+          const { database, query, collection, filter = {}, projection = {}, operation = 'find', document = {}, profile } = validateInput(UnifiedQuerySchema, args as any);
 
           logSecurityEvent("unified_query_attempt", {
             database,
             hasQuery: !!query,
             hasCollection: !!collection,
+            operation,
             profile: profile || "active"
           });
 
@@ -832,10 +857,61 @@ server.setRequestHandler(
 
           if (database === 'mongo') {
             const mongoDb = await connectionManager.getConnection('mongo', profile);
-            const rows = await mongoDb.find(collection!, filter, projection);
-            return {
-              content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-            };
+            let result;
+
+            switch (operation) {
+              case 'find':
+                result = await mongoDb.find(collection!, filter, projection);
+                return {
+                  content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                };
+
+              case 'insert':
+                result = await mongoDb.insert(collection!, document);
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      success: true,
+                      operation: 'insert',
+                      insertedId: result.insertedId,
+                      message: `Document inserted successfully into ${collection}`
+                    }, null, 2)
+                  }],
+                };
+
+              case 'update':
+                result = await mongoDb.update(collection!, filter, { $set: document });
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      success: true,
+                      operation: 'update',
+                      matchedCount: result.matchedCount,
+                      modifiedCount: result.modifiedCount,
+                      message: `Updated ${result.modifiedCount} documents in ${collection}`
+                    }, null, 2)
+                  }],
+                };
+
+              case 'delete':
+                result = await mongoDb.delete(collection!, filter);
+                return {
+                  content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                      success: true,
+                      operation: 'delete',
+                      deletedCount: result.deletedCount,
+                      message: `Deleted ${result.deletedCount} documents from ${collection}`
+                    }, null, 2)
+                  }],
+                };
+
+              default:
+                throw new Error(`Unsupported MongoDB operation: ${operation}`);
+            }
           }
 
           throw new Error(`Unsupported database: ${database}`);
