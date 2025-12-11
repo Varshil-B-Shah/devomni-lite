@@ -10,6 +10,10 @@ AI-powered API generation using database schemas from DevOmni MCP server.
 - **⚡ Smart Caching**: Local schema caching for better performance
 - **🛠️ CRUD Generation**: Generate complete CRUD operations for any table
 - **📝 TypeScript Types**: Automatic TypeScript interface generation from database schemas
+- **🌐 Cross-Workspace Support**: Works globally across all VS Code workspaces
+- **⚙️ One-Click MCP Setup**: Automatic GitHub Copilot MCP integration
+- **📊 Profile Management**: Switch between multiple database configurations
+- **🎯 Context Management**: Share workflow contexts across workspaces
 
 ## How It Works
 
@@ -33,51 +37,97 @@ DevOmni MCP Server ←→ VS Code Extension ←→ GitHub Copilot
 
 ### Installation
 
-1. Open VS Code
-2. Go to Extensions (Ctrl+Shift+X)
-3. Search for "DevOmni Code Generator" (when published)
-4. Install the extension
+1. **Download/Build** the extension (.vsix file)
+2. **Install in VS Code**:
+   ```bash
+   code --install-extension ./devomni-codegen-0.1.0.vsix
+   ```
+3. **Configure Extension Path**:
+   - Copy `config.json.example` to `config.json`
+   - Update `devomniProjectRoot` with your DevOmni installation path
 
-### Configuration
+### One-Click Setup
 
-Open VS Code settings and configure:
-
-```json
-{
-  "devomni.mcpServerUrl": "http://localhost:3000",
-  "devomni.database": "postgres", // or "mysql", "mongo"
-  "devomni.targetFramework": "nextjs", // or "express", "nestjs", etc.
-  "devomni.autoRefreshSchema": true
-}
-```
+1. **Open ANY workspace** in VS Code
+2. **Command Palette** (Ctrl+Shift+P) → `DevOmni: Setup MCP Integration for GitHub Copilot`
+3. **Restart VS Code** when prompted
+4. **Done!** GitHub Copilot now has DevOmni tools **globally across all workspaces**
 
 ### Usage
 
 1. **Open Command Palette** (Ctrl+Shift+P)
 2. **Run**: `DevOmni: Refresh Database Schema`
 3. **Ask GitHub Copilot**: 
+   - "List available workflow contexts"
    - "Generate CRUD APIs for users table"
    - "Create TypeScript types for all tables"
-   - "Generate Next.js API routes"
+   - "Get context details for my project"
+
+## 🌐 Global Workspace Support
+
+Once set up, DevOmni works **across ALL VS Code workspaces**:
+- **No per-workspace configuration** needed
+- **Shared contexts** between projects
+- **Centralized schema** and profile management
+- **One extension installation** serves multiple projects
 
 ## Commands
 
+### **Setup & Configuration**
+- **DevOmni: Setup MCP Integration for GitHub Copilot** - 🎯 One-click global MCP setup
+- **DevOmni: Setup Project Configuration** - Configure database connections and profiles
+
+### **Code Generation**
 - **DevOmni: Generate APIs from Database Schema** - Generate complete API structure
 - **DevOmni: Refresh Database Schema** - Sync latest schema from database
 - **DevOmni: Show Database Schema** - View cached schema
 - **DevOmni: Generate CRUD APIs for Table** - Generate CRUD for specific table
 - **DevOmni: Generate TypeScript Types** - Create type definitions
 
-## Settings
+### **Context Management**
+- **DevOmni: List Available Workflow Contexts** - Browse contexts created by Claude Desktop
+- **DevOmni: Search Workflow Contexts** - Find contexts by keywords
+- **DevOmni: Get Workflow Context** - Retrieve specific context details
+- **DevOmni: Create New Workflow Context** - Create contexts for AI generation
 
+### **Profile Management**
+- **DevOmni: List Database Profiles** - View and switch between database configurations
+- **DevOmni: Create Profile** - Add new database connection profiles
+- **DevOmni: Switch Profile** - Change active database profile
+- **DevOmni: Delete Profile** - Remove database profiles
+- **DevOmni: Test Database Connection** - Verify database connectivity
+
+## Configuration
+
+### **Extension Configuration (config.json)**
+```json
+{
+  "devomniProjectRoot": "C:\\path\\to\\your\\devomni\\installation"
+}
+```
+
+### **VS Code Settings (Optional)**
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `devomni.mcpServerUrl` | DevOmni MCP server URL | `http://localhost:3000` |
+| `devomni.mcpServerUrl` | DevOmni HTTP server URL | `http://localhost:3000` |
 | `devomni.database` | Database type | `postgres` |
 | `devomni.targetFramework` | Target framework for code generation | `nextjs` |
 | `devomni.autoRefreshSchema` | Auto-refresh schema on startup | `true` |
 | `devomni.schemaCache.enabled` | Enable local caching | `true` |
 | `devomni.schemaCache.ttl` | Cache TTL in milliseconds | `300000` (5 min) |
+
+### **MCP Server Configuration (Automatic)**
+After running "Setup MCP Integration", your workspace will have:
+```json
+{
+  "github.copilot.chat.mcp.servers": {
+    "devomni": {
+      "command": "node",
+      "args": ["C:\\path\\to\\devomni\\dist\\mcp-server-copilot.js"]
+    }
+  }
+}
+```
 
 ## Generated Files
 
@@ -140,15 +190,30 @@ The extension automatically caches database schemas for better performance:
 
 ## Troubleshooting
 
-### Extension not connecting to MCP server
-- Ensure DevOmni MCP server is running on configured URL
-- Check `devomni.mcpServerUrl` setting
-- Verify database connections in MCP server
+### MCP Integration not working
+- Run "DevOmni: Setup MCP Integration for GitHub Copilot" command
+- Restart VS Code after setup
+- Check that `config.json` has correct `devomniProjectRoot` path
+
+### Extension not connecting to DevOmni
+- Ensure DevOmni HTTP server is running (`node dist/server.js`)
+- Check `devomni.mcpServerUrl` setting (default: http://localhost:3000)
+- Verify `config.json` has correct DevOmni installation path
+
+### GitHub Copilot can't see DevOmni tools
+- Ensure MCP integration is set up (run setup command)
+- Restart VS Code completely
+- Check VS Code settings for `github.copilot.chat.mcp.servers.devomni`
+
+### Contexts not shared across workspaces
+- Verify all workspaces point to same DevOmni installation
+- Check `DEVOMNI_PROJECT_ROOT` environment variable
+- Ensure contexts exist in the centralized `.devomni` folder
 
 ### Schema not refreshing
 - Run "DevOmni: Refresh Database Schema" manually
-- Check database permissions
-- Verify environment variables in MCP server
+- Check database permissions and connections
+- Verify active profile has correct database configuration
 
 ### Generated code has errors
 - Ensure target framework is correctly set

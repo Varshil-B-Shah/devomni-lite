@@ -18,11 +18,16 @@ DevOmni Lite is a **secure** Model Context Protocol (MCP) server that enables AI
 - **📋 Multi-Framework Support**: Next.js, Express, NestJS, FastAPI, and more
 - **⚡ Smart Schema Caching**: Automatic schema synchronization and caching
 - **🔄 Real-time Updates**: Schema stays in sync with your database changes
+- **🌐 Cross-Workspace Contexts**: Share workflow contexts across multiple VS Code workspaces
+- **⚙️ One-Click Setup**: Automatic MCP configuration via VS Code extension command
 
 ### **Enhanced MCP Tools**
 - **`get_database_schema`**: Extract complete table structures and relationships
 - **`list_database_tables`**: Get all tables with optional row counts  
 - **`export_schema_for_codegen`**: Schema optimized for AI code generation
+- **`list_contexts`**: Access workflow contexts across workspaces
+- **`search_contexts`**: Find relevant contexts by keywords, database, or framework
+- **`get_context`**: Retrieve specific workflow context with full details
 
 ## 🛡️ Security Features
 - **🔒 Input Validation**: Comprehensive Zod-based runtime validation
@@ -56,15 +61,16 @@ git clone <repo-url>
 cd devomni-lite
 npm install
 
-# Configure database
-echo "PG_CONNECTION_STRING=postgresql://user:password@host:5432/db" > .env
+# Configure database (copy example and edit)
+cp .env.example .env
+# Edit .env with your actual database credentials
 
 # Build and start
 npm run build
 npm start  # MCP server for Claude Desktop
 
 # Also start HTTP server for VS Code extension
-node dist/server.js  # HTTP server on port 3000
+node dist/server.js  # HTTP server (uses PORT from .env, default 3000)
 ```
 
 ### **2. Install VS Code Extension**
@@ -73,23 +79,30 @@ cd extension
 npm install
 npm run compile
 
+# Configure extension path
+cp config.json.example config.json
+# Edit config.json with your DevOmni installation path
+
 # Install in VS Code (or from marketplace when published)
 code --install-extension ./devomni-codegen-0.1.0.vsix
 ```
 
-### **3. Configure VS Code**
-```json
-{
-  "devomni.mcpServerUrl": "http://localhost:3000",
-  "devomni.database": "postgres",
-  "devomni.targetFramework": "nextjs"
-}
-```
+### **3. One-Click MCP Setup**
+1. **Open ANY workspace** in VS Code
+2. **Command Palette** → `DevOmni: Setup MCP Integration for GitHub Copilot`
+3. **Restart VS Code** when prompted
+4. **Done!** GitHub Copilot now has DevOmni tools globally
 
 ### **4. Generate APIs with AI**
 1. **Command Palette** → `DevOmni: Refresh Database Schema`
 2. **Ask GitHub Copilot**: "Generate CRUD APIs for users table"
 3. **Watch magic happen**: Complete API files created automatically!
+
+## 🌐 **Cross-Workspace Usage**
+Once set up, DevOmni works **globally across all VS Code workspaces**:
+- **Shared contexts**: All workspaces access the same workflow contexts
+- **Centralized configuration**: One DevOmni installation serves multiple projects
+- **No per-workspace setup**: MCP integration works everywhere after initial setup
 
 ## 🔄 **Dual Interface Architecture**
 
@@ -118,16 +131,29 @@ VS Code Extension ←→ DevOmni HTTP Server (port 3000) ←→ GitHub Copilot
    npm install
    ```
 3. **Configure your databases:**
-   - Add your database connection details to a `.env` file:
+   - Copy the example environment file:
+     ```bash
+     cp .env.example .env
+     ```
+   - Edit `.env` with your actual database connection details:
      ```env
+     # PostgreSQL
      PG_CONNECTION_STRING=postgresql://<user>:<password>@<host>:5432/<db>
+     
+     # MySQL
      MYSQL_HOST=localhost
      MYSQL_PORT=3306
      MYSQL_USER=user
      MYSQL_PASSWORD=password
      MYSQL_DATABASE=database
+     
+     # MongoDB
      MONGODB_URI=mongodb://localhost:27017
      MONGODB_DATABASE=database
+     
+     # DevOmni Configuration
+     PORT=3000
+     PROJECT_ROOT=C:\path\to\your\devomni\installation
      ```
 4. **Build the project:**
    ```bash
@@ -142,6 +168,18 @@ VS Code Extension ←→ DevOmni HTTP Server (port 3000) ←→ GitHub Copilot
    npm start
    ```
 7. **Integrate with Claude Desktop or any MCP client**
+
+## 🔧 **Environment Configuration**
+DevOmni supports dynamic configuration via environment variables:
+- **`PORT`** / **`DEVOMNI_HTTP_PORT`**: HTTP server port (default: 3000)
+- **`PROJECT_ROOT`** / **`DEVOMNI_PROJECT_ROOT`**: DevOmni installation path
+- **Database connections**: All major databases supported with flexible configuration
+
+## 📦 **Extension Configuration**
+For VS Code extension users:
+- **Copy `extension/config.json.example`** to `extension/config.json`
+- **Update `devomniProjectRoot`** to your DevOmni installation path
+- **Extension works globally** across all VS Code workspaces
 
 ## 🗂️ Filesystem Integration (Optional)
 Enable Claude to access and manage your local files or Obsidian notes for advanced automation and persistent memory.
