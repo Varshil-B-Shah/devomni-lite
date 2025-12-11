@@ -240,6 +240,21 @@ app.post("/mcp-tool", async (req, res) => {
         break;
       }
 
+      case "list_connection_profiles": {
+        const allProfiles = await profileManager.getAllProfiles();
+        const profiles = Object.entries(allProfiles.profiles).map(([name, config]) => ({
+          name,
+          databases: Object.keys(config).filter(db => config[db as keyof typeof config]),
+          isActive: name === allProfiles.activeProfile,
+          source: 'project'
+        }));
+        result = { content: [{ 
+          type: "text", 
+          text: JSON.stringify(profiles, null, 2) 
+        }] };
+        break;
+      }
+
       case "switch_profile": {
         // Accept both profileName and profile_name for compatibility
         const profileName = (args as any).profileName || (args as any).profile_name;
